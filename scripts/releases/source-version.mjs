@@ -190,13 +190,20 @@ async function inspect(options) {
         const metadata = jsonVersion(manifest);
         return { format: 'json', version: metadata.version, files: [{ path: 'manifest.json', raw: manifest, ...metadata }] };
     }
+    const rootPom = await read('pom.xml');
+    if (rootPom === null) {
+        const packageManifest = await read('package.json');
+        if (packageManifest === null) throw new Error('The source manifest, POM or package.json is missing.');
+        const metadata = jsonVersion(packageManifest);
+        return { format: 'json', version: metadata.version, files: [{ path: 'package.json', raw: packageManifest, ...metadata }] };
+    }
     const documents = [];
     const visited = new Set();
     const visit = async (path) => {
         metadataPath(path);
         if (visited.has(path.toLowerCase()) || visited.size >= maximumFiles) throw new Error('Duplicate or excessive POM modules.');
         visited.add(path.toLowerCase());
-        const raw = await read(path);
+        const raw = path === 'pom.xml' ? rootPom : await read(path);
         if (raw === null) throw new Error('The source POM or a declared module POM is missing.');
         const metadata = xml(raw);
         documents.push({ path, raw, metadata, positions: [] });

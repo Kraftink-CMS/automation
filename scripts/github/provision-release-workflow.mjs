@@ -92,7 +92,7 @@ async function contents(client, repository, sha) {
 
 export async function managedReleaseOptIn({ client, repository }) {
     repositoryName(repository);
-    const sha = await reference(client, repository, 'dev');
+    const sha = await reference(client, repository, 'dev', true);
     return sha && (await contents(client, repository, sha))?.managed ? sha : null;
 }
 

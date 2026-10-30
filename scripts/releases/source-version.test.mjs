@@ -36,7 +36,7 @@ async function fixture(context, files) {
 
 test('JSON version changes preserve every byte outside the unique root value', async () => {
     const before = '\uFEFF{\r\n  "name": "Sample", "release": {"version":"9.0.0"},\r\n  "version" : "1.0.0-dev", "description": "escaped \\\"version\\\""\r\n}\r\n';
-    const files = { 'manifest.json': before, 'pom.xml': 'This POM must never be read.' };
+    const files = { 'manifest.json': before, 'pom.xml': 'This POM must never be read.', 'package.json': 'This package must never be read.' };
     const calls = [];
     const source = async (path) => {
         calls.push(path);
@@ -70,6 +70,54 @@ test('escaped root JSON keys work while duplicate or invalid versions are reject
     }
     await assert.rejects(sourceVersionChanges({ read: read({ 'manifest.json': '{"version":"1.0.1-dev"}' }),
         version: '1.0.1', expectedVersion: '1.0.0-dev' }), /changed before preparation/);
+});
+
+test('package.json uses exact JSON version edits only when no manifest or POM is present', async () => {
+    const before = '\uFEFF{\r\n  "name": "@community/application",\r\n  "version" : "0.0.1-dev",\r\n'
+        + '  "dependencies": { "library": "0.0.1-dev" }, "metadata": {"version":"9.0.0"}\r\n}\r\n';
+    const calls = [];
+    const source = async (path) => {
+        calls.push(path);
+        return path === 'package.json' ? before : null;
+    };
+    assert.deepEqual(await inspectSourceVersion({ read: source }), {
+        format: 'json', version: '0.0.1-dev', paths: ['package.json'],
+    });
+    assert.deepEqual(calls, ['manifest.json', 'pom.xml', 'package.json']);
+    const changes = await sourceVersionChanges({ read: source, version: '0.0.1', expectedVersion: '0.0.1-dev' });
+    assert.deepEqual(changes.files, [{ path: 'package.json', before,
+        after: before.replace('"version" : "0.0.1-dev"', '"version" : "0.0.1"') }]);
+    assert.deepEqual((await sourceVersionChanges({ read: source, version: '0.0.1-dev' })).files, []);
+    await assert.rejects(sourceVersionChanges({ read: source, version: '0.0.1', expectedVersion: '0.0.2-dev' }),
+        /changed before preparation/);
+});
+
+test('POM metadata remains authoritative over a frontend package and invalid primary metadata cannot fall through', async () => {
+    const calls = [];
+    const root = pom(`${identity}<version>1.0.0-dev</version>`);
+    const source = async (path) => {
+        calls.push(path);
+        if (path === 'pom.xml') return root;
+        if (path === 'package.json') throw new Error('Frontend package must not be inspected.');
+        return null;
+    };
+    assert.deepEqual(await inspectSourceVersion({ read: source }), { format: 'pom', version: '1.0.0-dev', paths: ['pom.xml'] });
+    assert.deepEqual(calls, ['manifest.json', 'pom.xml']);
+    for (const files of [
+        { 'manifest.json': '{"name":"missing-version"}', 'package.json': '{"version":"0.0.1-dev"}' },
+        { 'pom.xml': '<project/>', 'package.json': '{"version":"0.0.1-dev"}' },
+    ]) await assert.rejects(inspectSourceVersion({ read: read(files) }));
+});
+
+test('package metadata refuses ambiguous versions and bounded reader violations', async () => {
+    for (const value of [
+        '{"version":"0.0.1-dev","\\u0076ersion":"0.0.1-dev"}',
+        '{"version":null}',
+        '{"version":"0.0.1-beta.1"}',
+        '{"version":"00.0.1"}',
+        ' '.repeat(1048577),
+        Buffer.from('{"version":"0.0.1-dev"}'),
+    ]) await assert.rejects(inspectSourceVersion({ read: read({ 'package.json': value }) }));
 });
 
 test('POM reactor edits update only project version and exact managed parent versions', async () => {
@@ -154,6 +202,26 @@ test('default Git reader refuses metadata symlinks and invalid UTF8 blobs', asyn
     await writeFile(resolve(data.root, 'manifest.json'), Buffer.from([0xc3, 0x28]));
     data.git('add', 'manifest.json');
     data.git('commit', '-m', 'Invalid UTF8 metadata');
+    await assert.rejects(inspectSourceVersion({ root: data.root, sha: data.git('rev-parse', 'HEAD') }));
+});
+
+test('package version reads use committed bytes and reject linked or invalid UTF-8 package blobs', async (context) => {
+    const before = '{\r\n  "name":"application", "version":"0.0.1-dev"\r\n}\r\n';
+    const data = await fixture(context, { 'package.json': before });
+    await writeFile(resolve(data.root, 'package.json'), '{"version":"9.0.0-dev"}\n');
+    const status = data.git('status', '--porcelain');
+    const changes = await sourceVersionChanges({ root: data.root, sha: data.sha, version: '0.0.1' });
+    assert.deepEqual(changes.files, [{ path: 'package.json', before, after: before.replace('0.0.1-dev', '0.0.1') }]);
+    assert.equal(data.git('status', '--porcelain'), status);
+    const hash = execFileSync('git', ['-C', data.root, 'hash-object', '-w', '--stdin'], {
+        input: '../outside', encoding: 'utf8', windowsHide: true, shell: false,
+    }).trim();
+    data.git('update-index', '--add', '--cacheinfo', '120000', hash, 'package.json');
+    data.git('commit', '-m', 'Unsafe package metadata symlink');
+    await assert.rejects(inspectSourceVersion({ root: data.root, sha: data.git('rev-parse', 'HEAD') }), /tracked regular/);
+    await writeFile(resolve(data.root, 'package.json'), Buffer.from([0xc3, 0x28]));
+    data.git('add', 'package.json');
+    data.git('commit', '-m', 'Invalid UTF8 package metadata');
     await assert.rejects(inspectSourceVersion({ root: data.root, sha: data.git('rev-parse', 'HEAD') }));
 });
 
