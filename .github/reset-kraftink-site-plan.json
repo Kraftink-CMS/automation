@@ -1,0 +1,44 @@
+{
+  "preparedAt": "2026-10-30T23:21:53.910Z",
+  "repository": "Kraftink-CMS/kraftink.com",
+  "expected": {
+    "dev": "5337fd6dfb2ffac2b337c1642951bbb6af95e577",
+    "master": "a39f8e2df2a08661ab43562b64006bf66843b9bc"
+  },
+  "target": {
+    "dev": "e923afaf3133788bfedc3181747599c1405c436c",
+    "master": "61b1aa4ac433ecf53bc5f04c55b9d84c284f6190"
+  },
+  "maintenanceBranch": "maintenance/clean-start-20261031",
+  "version": "1.0.0-dev",
+  "rulesetIds": [
+    26228819,
+    26228820
+  ],
+  "releases": [
+    {
+      "id": 429570758,
+      "tag": "v1.0.1"
+    },
+    {
+      "id": 429548396,
+      "tag": "v1.0.0"
+    }
+  ],
+  "tags": [
+    "v1.0.0",
+    "v1.0.1"
+  ],
+  "oldRunIds": [
+    41142422739,
+    41142215004
+  ],
+  "sourceDifferences": [
+    "migrations/0001_initial.sql",
+    "migrations/0002_two_factor.sql",
+    "migrations/0003_upload_limit.sql",
+    "migrations/0004_sensitive_two_factor.sql",
+    "migrations/0005_purchase_invoices.sql",
+    "package.json"
+  ]
+}

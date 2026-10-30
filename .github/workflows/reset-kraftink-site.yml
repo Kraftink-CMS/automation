@@ -1,0 +1,44 @@
+name: Reset the KraftInk website
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/reset-kraftink-site.yml
+      - .github/reset-kraftink-site-plan.json
+      - scripts/github/reset-kraftink-site.mjs
+permissions:
+  contents: read
+jobs:
+  reset:
+    if: github.repository == 'Kraftink-CMS/automation' && !github.event.repository.fork && github.event_name == 'push' && github.ref == 'refs/heads/master' && github.workflow_ref == 'Kraftink-CMS/automation/.github/workflows/reset-kraftink-site.yml@refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: repository-administration
+    concurrency:
+      group: kraftink-master-mutations
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Reset the exact website refs and restore their protections
+        env:
+          KRAFTINK_AUTOMATION_APP_ID: ${{ vars.KRAFTINK_AUTOMATION_APP_ID }}
+          KRAFTINK_AUTOMATION_PRIVATE_KEY: ${{ secrets.KRAFTINK_AUTOMATION_PRIVATE_KEY }}
+        run: node scripts/github/reset-kraftink-site.mjs
+      - name: Preserve the non-secret operation proof
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: kraftink-clean-start-proof
+          path: |
+            ${{ runner.temp }}/kraftink-clean-start/rules-before.json
+            ${{ runner.temp }}/kraftink-clean-start/rules-after.json
+            ${{ runner.temp }}/kraftink-clean-start/reset-proof.json
+          if-no-files-found: ignore
+          retention-days: 1
