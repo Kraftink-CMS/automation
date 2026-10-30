@@ -1,0 +1,66 @@
+name: KraftInk automation
+description: Locate shared tools, plan a stable version or publish custom release assets.
+inputs:
+  operation:
+    description: Operation to run (locate, plan or publish)
+    default: locate
+  initial-version:
+    description: First stable version when the repository has no release tag
+    default: '1.0.0'
+  bump:
+    description: Version level (auto, patch, minor or major)
+    default: auto
+  version:
+    description: Optional exact stable version
+  notes-mode:
+    description: Release notes mode (auto, append or replace)
+    default: auto
+  notes:
+    description: Markdown text required by append or replace
+  plan-path:
+    description: Release plan file, defaults to the runner temporary directory
+  artifacts-path:
+    description: Directory containing the files to publish
+  working-directory:
+    description: Source repository directory
+    default: .
+  github-token:
+    description: Token with contents and statuses write permissions to publish and open the next dev cycle
+outputs:
+  root:
+    description: Absolute path to the central tooling checkout
+    value: ${{ steps.location.outputs.root }}
+  version:
+    description: Planned or published stable version
+    value: ${{ steps.release.outputs.version }}
+  plan-path:
+    description: Absolute path to the release plan
+    value: ${{ steps.release.outputs.plan-path }}
+runs:
+  using: composite
+  steps:
+    - id: location
+      shell: bash
+      env:
+        TOOL_ACTION_PATH: ${{ github.action_path }}
+      run: printf 'root=%s\n' "$TOOL_ACTION_PATH" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+      if: inputs.operation != 'locate'
+      with:
+        node-version: '24'
+    - id: release
+      if: inputs.operation != 'locate'
+      shell: bash
+      env:
+        TOOL_ACTION_PATH: ${{ github.action_path }}
+        RELEASE_OPERATION: ${{ inputs.operation }}
+        RELEASE_INITIAL_VERSION: ${{ inputs.initial-version }}
+        RELEASE_BUMP: ${{ inputs.bump }}
+        RELEASE_VERSION: ${{ inputs.version }}
+        RELEASE_NOTES_MODE: ${{ inputs.notes-mode }}
+        RELEASE_NOTES: ${{ inputs.notes }}
+        RELEASE_PLAN_PATH: ${{ inputs.plan-path }}
+        RELEASE_ARTIFACTS_PATH: ${{ inputs.artifacts-path }}
+        RELEASE_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$TOOL_ACTION_PATH/scripts/releases/artifacts.mjs"

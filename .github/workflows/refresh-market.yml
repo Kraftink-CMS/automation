@@ -1,0 +1,60 @@
+name: Refresh Market
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  repository_dispatch:
+    types: [extension-published]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Repositories to refresh
+        type: choice
+        options:
+          - automatic
+          - repository
+          - all
+        default: automatic
+      repository:
+        description: owner/repository, required only for the repository scope
+        type: string
+        default: ''
+      dry_run:
+        description: Preview the catalogue without publishing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    if: ${{ github.repository == 'Kraftink-CMS/automation' && !github.event.repository.fork && github.ref == 'refs/heads/master' && github.workflow_ref == 'Kraftink-CMS/automation/.github/workflows/refresh-market.yml@refs/heads/master' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' && github.event.action == 'extension-published' && github.event.client_payload && github.event.client_payload.repository) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: kraftink-master-mutations
+      cancel-in-progress: false
+      queue: max
+    environment: repository-administration
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Generate and publish the approved catalogue
+        env:
+          KRAFTINK_AUTOMATION_APP_ID: ${{ vars.KRAFTINK_AUTOMATION_APP_ID }}
+          KRAFTINK_AUTOMATION_PRIVATE_KEY: ${{ secrets.KRAFTINK_AUTOMATION_PRIVATE_KEY }}
+          KRAFTINK_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REQUESTED_REPOSITORY: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.repository || inputs.repository || '' }}
+          REFRESH_SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || github.event_name == 'repository_dispatch' && 'notification' || 'automatic' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        shell: bash
+        run: |
+          args=(--scope "$REFRESH_SCOPE" "$REQUESTED_REPOSITORY")
+          if [[ "$DRY_RUN" == true ]]; then args+=(--check); fi
+          node scripts/market/publish.mjs "${args[@]}"

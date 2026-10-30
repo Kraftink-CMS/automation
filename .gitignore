@@ -1,0 +1,7 @@
+/node_modules/
+/scripts/releases/php-scoper/vendor/
+/dist/
+/.work/
+*.log
+.DS_Store
+Thumbs.db

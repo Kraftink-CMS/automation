@@ -1,0 +1,40 @@
+name: Release
+on:
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version level
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      notes_mode:
+        description: Release notes
+        type: choice
+        options: [auto, append, replace]
+        default: auto
+      notes:
+        description: Markdown message for append or replace
+        type: string
+        required: false
+permissions:
+  contents: read
+jobs:
+  checks:
+    if: github.event_name == 'pull_request'
+    uses: Kraftink-CMS/automation/.github/workflows/validate-repository.yml@master
+    permissions:
+      contents: read
+  release:
+    if: github.event_name == 'workflow_dispatch'
+    uses: Kraftink-CMS/automation/.github/workflows/request-extension-release.yml@master
+    with:
+      bump: ${{ inputs.bump }}
+      notes_mode: ${{ inputs.notes_mode }}
+      notes: ${{ inputs.notes }}
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+      actions: read

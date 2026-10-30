@@ -1,0 +1,34 @@
+name: Validate Market
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: catalogue
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: Kraftink-CMS/automation
+          ref: master
+          path: tools
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Validate the resource selection
+        run: |
+          node --input-type=module <<'JS'
+          import { readFile } from 'node:fs/promises';
+          import { sourceResources } from './tools/scripts/market/catalogue.mjs';
+          sourceResources(JSON.parse(await readFile('catalogue/resources.json', 'utf8')));
+          console.log('The Market resource selection is valid.');
+          JS

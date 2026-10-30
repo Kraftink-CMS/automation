@@ -1,0 +1,45 @@
+name: Protect repositories
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview changes without applying them
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: kraftink-repository-protection
+  cancel-in-progress: false
+jobs:
+  protect:
+    if: ${{ github.repository == 'Kraftink-CMS/automation' && !github.event.repository.fork && github.ref == 'refs/heads/master' && github.workflow_ref == 'Kraftink-CMS/automation/.github/workflows/protect-repositories.yml@refs/heads/master' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: kraftink-master-mutations
+      cancel-in-progress: false
+      queue: max
+    environment: repository-administration
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+      - name: Reconcile repository rules and Release workflows
+        env:
+          KRAFTINK_AUTOMATION_APP_ID: ${{ vars.KRAFTINK_AUTOMATION_APP_ID }}
+          KRAFTINK_AUTOMATION_PRIVATE_KEY: ${{ secrets.KRAFTINK_AUTOMATION_PRIVATE_KEY }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+        shell: bash
+        run: |
+          args=()
+          if [[ "$DRY_RUN" == true ]]; then args+=(--check); fi
+          node scripts/github/govern-repositories.mjs "${args[@]}"

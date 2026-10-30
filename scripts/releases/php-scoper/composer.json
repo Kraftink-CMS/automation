@@ -1,0 +1,13 @@
+{
+    "name": "kraftink/extension-build-tools",
+    "description": "Build-time isolation tools for KraftInk extensions.",
+    "license": "MIT",
+    "require": {
+        "humbug/php-scoper": "0.18.20"
+    },
+    "config": {
+        "allow-plugins": false,
+        "platform": {"php": "8.3.0"},
+        "sort-packages": true
+    }
+}

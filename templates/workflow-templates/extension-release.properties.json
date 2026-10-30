@@ -1,0 +1,7 @@
+{
+    "name": "KraftInk Extension Release",
+    "description": "Validate and publish KraftInk plugins, themes and game modules using centrally maintained tools.",
+    "filePatterns": [
+        "^manifest\\.json$"
+    ]
+}

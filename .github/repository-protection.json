@@ -1,0 +1,85 @@
+{
+    "schema": 1,
+    "organization": "Kraftink-CMS",
+    "excluded_repositories": ["kraftink.com", "automation"],
+    "policies": [
+        {
+            "id": "common",
+            "repositories": { "include": ["*"], "exclude": [] },
+            "rulesets": [
+                {
+                    "name": "Protect master",
+                    "target": "branch",
+                    "enforcement": "active",
+                    "bypass_actors": [],
+                    "conditions": {
+                        "ref_name": {
+                            "include": ["refs/heads/master"],
+                            "exclude": []
+                        }
+                    },
+                    "rules": [
+                        {
+                            "type": "deletion"
+                        },
+                        {
+                            "type": "non_fast_forward"
+                        },
+                        {
+                            "type": "pull_request",
+                            "parameters": {
+                                "required_approving_review_count": 0,
+                                "dismiss_stale_reviews_on_push": false,
+                                "required_reviewers": [],
+                                "require_code_owner_review": false,
+                                "require_last_push_approval": false,
+                                "required_review_thread_resolution": false,
+                                "require_extra_approval_for_unattributed_changes": false,
+                                "allowed_merge_methods": ["merge"]
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "id": "automated-promotions",
+            "repositories": { "include": ["*"], "exclude": [] },
+            "rulesets": [
+                {
+                    "name": "App-only master merges",
+                    "previous_names": ["Automated master promotions"],
+                    "target": "branch",
+                    "enforcement": "active",
+                    "bypass_actors": [
+                        {
+                            "actor_id": "${APP_ID}",
+                            "actor_type": "Integration",
+                            "bypass_mode": "pull_request"
+                        }
+                    ],
+                    "conditions": { "ref_name": { "include": ["refs/heads/master"], "exclude": [] } },
+                    "rules": [{ "type": "update", "parameters": { "update_allows_fetch_and_merge": false } }]
+                }
+            ]
+        },
+        {
+            "id": "extensions",
+            "repositories": { "include": ["Plugin-*", "Theme-*", "Game-*"], "exclude": [] },
+            "rulesets": [],
+            "release_workflow": true
+        },
+        {
+            "id": "cms",
+            "repositories": { "include": ["KraftInk"], "exclude": [] },
+            "rulesets": [],
+            "validated_releases": true
+        },
+        {
+            "id": "other-repositories",
+            "repositories": { "include": ["*"], "exclude": ["Plugin-*", "Theme-*", "Game-*", "Kraftink", "Market"] },
+            "rulesets": [],
+            "release_workflow": true
+        }
+    ]
+}

@@ -1,0 +1,167 @@
+name: Release a repository
+on:
+  workflow_call:
+    inputs:
+      bump:
+        type: string
+        default: auto
+      notes_mode:
+        description: Release notes mode (auto, append or replace)
+        type: string
+        default: auto
+      notes:
+        description: Optional Markdown message for append or replace
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_NOTES_MODE: ${{ inputs.notes_mode }}
+  RELEASE_NOTES: ${{ inputs.notes }}
+
+jobs:
+  prepare:
+    name: Prepare the stable source
+    if: ${{ github.event_name == 'workflow_dispatch' && !github.event.repository.fork && github.repository_owner == 'Kraftink-CMS' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: kraftink-release-${{ github.repository }}
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      statuses: write
+    outputs:
+      source_sha: ${{ steps.prepare.outputs.source_sha }}
+      kind: ${{ steps.prepare.outputs.kind }}
+      version: ${{ steps.prepare.outputs.version }}
+      context_id: ${{ steps.context.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: dev
+          path: .release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Kraftink-CMS/automation@master
+        id: tools
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - name: Prepare the immutable release context
+        id: prepare
+        env:
+          TOOLS_ROOT: ${{ steps.tools.outputs.root }}
+          RELEASE_ROOT: ${{ github.workspace }}/.release-source
+          RELEASE_DIRECTORY: ${{ runner.temp }}/release-context
+          RELEASE_BUMP: ${{ inputs.bump }}
+          GITHUB_TOKEN: ${{ github.token }}
+          KRAFTINK_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        shell: bash
+        run: node "$TOOLS_ROOT/scripts/releases/workflow.mjs" prepare "$RELEASE_DIRECTORY" "$RELEASE_BUMP"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        id: context
+        with:
+          name: release-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-context/
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    needs: prepare
+    uses: ./.github/workflows/validate-repository.yml
+    with:
+      ref: ${{ needs.prepare.outputs.source_sha }}
+      context-id: ${{ needs.prepare.outputs.context_id }}
+      release: true
+    permissions:
+      contents: read
+
+  promote:
+    name: Promote the validated source
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    outputs:
+      merge_sha: ${{ steps.promote.outputs.merge_sha }}
+      pull_number: ${{ steps.promote.outputs.pull_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          path: .release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Kraftink-CMS/automation@master
+        id: tools
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.context_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-context
+      - name: Merge the exact validated source through its pull request
+        id: promote
+        env:
+          TOOLS_ROOT: ${{ steps.tools.outputs.root }}
+          RELEASE_ROOT: ${{ github.workspace }}/.release-source
+          RELEASE_DIRECTORY: ${{ runner.temp }}/release-context
+          GITHUB_TOKEN: ${{ github.token }}
+          KRAFTINK_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        shell: bash
+        run: node "$TOOLS_ROOT/scripts/releases/workflow.mjs" promote "$RELEASE_DIRECTORY"
+
+  publish:
+    name: Publish the stable release
+    needs: [prepare, build, promote]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          path: .release-source
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: Kraftink-CMS/automation@master
+        id: tools
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.prepare.outputs.context_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-context
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: ${{ needs.build.outputs.assets_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-assets
+      - name: Verify and publish the validated files
+        env:
+          TOOLS_ROOT: ${{ steps.tools.outputs.root }}
+          RELEASE_ROOT: ${{ github.workspace }}/.release-source
+          RELEASE_DIRECTORY: ${{ runner.temp }}/release-context
+          RELEASE_ASSETS: ${{ runner.temp }}/release-assets
+          RELEASE_MERGE_SHA: ${{ needs.promote.outputs.merge_sha }}
+          RELEASE_PULL_NUMBER: ${{ needs.promote.outputs.pull_number }}
+          GITHUB_TOKEN: ${{ github.token }}
+          KRAFTINK_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        shell: bash
+        run: node "$TOOLS_ROOT/scripts/releases/workflow.mjs" publish "$RELEASE_DIRECTORY" "$RELEASE_ASSETS"

@@ -1,0 +1,36 @@
+name: Tooling checks
+on:
+  push:
+    branches:
+      - master
+      - dev
+  pull_request: {}
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
+        with:
+          php-version: "8.5"
+          extensions: zip
+          coverage: none
+          tools: composer:v2
+      - name: Install Node dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install PHP build tooling
+        run: composer install --working-dir=scripts/releases/php-scoper --no-interaction --prefer-dist --no-progress --no-scripts --no-plugins
+      - name: Test tooling and workflow contracts
+        run: npm test
+      - name: Check PHP tooling syntax
+        run: find scripts -type f -name '*.php' -not -path '*/vendor/*' -print0 | xargs -0 -r -n 1 php -l
