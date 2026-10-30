@@ -21,8 +21,14 @@ async function fixture(t, kind = 'custom') {
     git('init', '-b', 'master');
     git('config', 'user.name', 'Release fixture');
     git('config', 'user.email', 'release@example.invalid');
-    if (kind === 'custom') {
-        await writeFile(resolve(root, 'pom.xml'), '<project><modelVersion>4.0.0</modelVersion><groupId>example</groupId><artifactId>example</artifactId><version>1.0.0-dev</version></project>\n');
+    if (kind === 'custom' || kind === 'node') {
+        if (kind === 'node') {
+            await writeFile(resolve(root, 'package.json'), JSON.stringify({ name: 'example-website', version: '1.0.0-dev', private: true }) + '\n');
+            await mkdir(resolve(root, '.github/workflows'), { recursive: true });
+            await writeFile(resolve(root, '.github/workflows/deploy.yml'), 'name: Deploy\non:\n  repository_dispatch:\n    types: [kraftink-release-published]\njobs: {}\n');
+        } else {
+            await writeFile(resolve(root, 'pom.xml'), '<project><modelVersion>4.0.0</modelVersion><groupId>example</groupId><artifactId>example</artifactId><version>1.0.0-dev</version></project>\n');
+        }
         await mkdir(resolve(root, '.github/actions/build'), { recursive: true });
         await writeFile(resolve(root, '.github/actions/build/action.yml'), 'name: Build\nruns:\n  using: composite\n  steps: []\n');
     } else {
@@ -158,6 +164,7 @@ async function fixture(t, kind = 'custom') {
         }
         if (method === 'GET' && /^\/commits\/[a-f0-9]{40}\/pulls\?/.test(path))
             return state.indexEmpty-- > 0 ? [] : [structuredClone(state.pull)];
+        if (method === 'POST' && path === '/dispatches') return null;
         throw new Error(`Unexpected ${method} ${path}`);
     }, release(tag) { return this.request('GET', `/releases/tags/${tag}`); } };
     const environment = { GITHUB_REPOSITORY: repository, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/dev',
@@ -320,6 +327,54 @@ test('verified publication advances dev through the real version helper while pr
     assert.match(data.serverGit('show', `${next}:pom.xml`), /<version>1\.0\.1-dev<\/version>/);
     assert.match(data.serverGit('show', 'master:pom.xml'), /<version>1\.0\.0<\/version>/);
     assert.deepEqual(data.commit(next).parents, [{ sha: selected.source_sha }, { sha: promoted.merge_sha }]);
+});
+
+test('Node custom releases dispatch their optional deployment only after verified publication and development advancement', async (t) => {
+    const data = await fixture(t, 'node');
+    assert.deepEqual(await describeSource(data.root), { kind: 'custom', version: '1.0.0-dev', tests: false });
+    const selected = await data.prepare();
+    const context = await data.context();
+    assert.equal(context.deployment, 'deploy.yml');
+    const promoted = await data.promote();
+    await writeFile(resolve(data.assetsDirectory, 'site.tar.gz'), 'validated custom deployment bytes\n');
+    const options = { ...data, environment: { ...data.environment,
+        RELEASE_MERGE_SHA: promoted.merge_sha, RELEASE_PULL_NUMBER: promoted.pull_number } };
+    await assert.rejects(publishRelease({ ...options, publish: async () => ({ complete: false }) }), /publication has not been verified/);
+    assert.equal(data.state.calls.some((call) => call.path === '/dispatches'), false);
+    assert.equal(data.serverGit('rev-parse', 'dev'), selected.source_sha);
+    let interrupted = true;
+    data.state.before = async (method, path) => {
+        if (method === 'POST' && path === '/dispatches' && interrupted) {
+            interrupted = false;
+            throw new Error('Deployment notification unavailable');
+        }
+    };
+    const publish = async ({ beforeMutation }) => { await beforeMutation('publish'); return { complete: true }; };
+    await assert.rejects(publishRelease({ ...options, publish }), /Deployment notification unavailable/);
+    const next = data.serverGit('rev-parse', 'dev');
+    assert.equal(JSON.parse(data.serverGit('show', `${next}:package.json`)).version, '1.0.1-dev');
+    assert.equal(JSON.parse(data.serverGit('show', 'master:package.json')).version, '1.0.0');
+    assert.equal((await publishRelease({ ...options, publish })).complete, true);
+    assert.equal(data.serverGit('rev-parse', 'dev'), next);
+    const notifications = data.state.calls.filter((call) => call.method === 'POST' && call.path === '/dispatches');
+    assert.equal(notifications.length, 2);
+    for (const notification of notifications) assert.deepEqual(notification.body, {
+        event_type: 'kraftink-release-published', client_payload: { commit: promoted.merge_sha, tag: 'v1.0.0' },
+    });
+});
+
+test('an untracked deployment workflow cannot enable notifications and changed deployment opt-in invalidates prepared context', async (t) => {
+    const data = await fixture(t);
+    await mkdir(resolve(data.root, '.github/workflows'), { recursive: true });
+    await writeFile(resolve(data.root, '.github/workflows/deploy.yml'), 'untracked opt-in');
+    assert.equal((await describeSource(data.root)).kind, 'custom');
+    await rm(resolve(data.root, '.github/workflows/deploy.yml'));
+    await data.prepare();
+    const context = await data.context();
+    assert.equal(context.deployment, undefined);
+    await writeFile(resolve(data.directory, 'context.json'), JSON.stringify({ ...context, deployment: 'deploy.yml' }));
+    await assert.rejects(data.promote(), /source does not match the prepared release/);
+    assert.equal(data.state.calls.some((call) => call.path === '/dispatches'), false);
 });
 
 test('both human repository writers and active public identity are required before preparing source changes', async (t) => {

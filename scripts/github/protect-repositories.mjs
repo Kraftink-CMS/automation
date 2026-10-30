@@ -11,6 +11,7 @@ const plainObject = (value) =>
     typeof value === 'object' &&
     [Object.prototype, null].includes(Object.getPrototypeOf(value));
 const validId = (value) => Number.isSafeInteger(value) && value > 0;
+const validSha = (value) => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const validName = (value) =>
     typeof value === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(value) && !['.', '..'].includes(value);
 const sameName = (left, right) => typeof left === 'string' && left.toLowerCase() === right.toLowerCase();
@@ -448,6 +449,23 @@ function repositoryIdentity(repo, config) {
     return { repository: name };
 }
 
+async function emptyRepository(client, repository, metadata) {
+    if (metadata.size !== 0) return false;
+    const branch = metadata.default_branch;
+    if (typeof branch !== 'string' || !/^[A-Za-z0-9_.\/-]{1,200}$/.test(branch)
+            || branch.split('/').some((part) => !part || part === '.' || part === '..'))
+        throw new ProtectionError('The repository default branch is invalid.');
+    try {
+        const head = await client.request('GET', `/repos/${repository}/git/ref/heads/${branch}`);
+        if (head?.ref !== `refs/heads/${branch}` || head.object?.type !== 'commit' || !validSha(head.object.sha))
+            throw new ProtectionError('The repository default branch reference is invalid.');
+        return false;
+    } catch (error) {
+        if (error.status === 404 || error.status === 409) return true;
+        throw error;
+    }
+}
+
 function localRuleset(value, repository, name, expectedId = null) {
     if (
         !plainObject(value) ||
@@ -759,6 +777,11 @@ export async function protectRepositories({ config, client, appId, check = false
                     confirmed: false,
                     note: 'Repository eligibility changed before reconciliation.',
                 });
+                continue;
+            }
+            if (await emptyRepository(client, name, metadata)) {
+                results.push({ repository: name, action: 'skipped', confirmed: false,
+                    note: 'Waiting for the first commit. No repository settings or files are created.' });
                 continue;
             }
             const callerRelease = metadata.fork === false && await managesCallerRelease(client, name, selected);

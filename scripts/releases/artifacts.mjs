@@ -9,7 +9,7 @@ import { advanceDevelopmentVersion } from './source-version-github.mjs';
 import { git, planVersion, stableVersion } from './version.mjs';
 
 export async function planArtifactVersion({ root, initialVersion = '1.0.0', bump = 'auto', version = null }) {
-    const tracked = git(root, ['ls-tree', '--name-only', 'HEAD', '--', 'manifest.json', 'pom.xml']);
+    const tracked = git(root, ['ls-tree', '--name-only', 'HEAD', '--', 'manifest.json', 'pom.xml', 'package.json']);
     const metadata = tracked ? await inspectSourceVersion({ root, sha: git(root, ['rev-parse', 'HEAD']) }) : null;
     if (metadata) {
         stableVersion(metadata.version);

@@ -13,7 +13,7 @@ function git(root, ...args) {
         stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-async function fixture(t, version) {
+async function fixture(t, version, format = 'pom') {
     const root = await mkdtemp(resolve(tmpdir(), 'kraftink-artifacts-version-'));
     t.after(async () => {
         assert.equal(dirname(root), resolve(tmpdir()));
@@ -22,7 +22,8 @@ async function fixture(t, version) {
     git(root, 'init', '-b', 'master');
     git(root, 'config', 'user.name', 'Release fixture');
     git(root, 'config', 'user.email', 'release@example.invalid');
-    await writeFile(resolve(root, 'pom.xml'), `<project><modelVersion>4.0.0</modelVersion><groupId>example</groupId><artifactId>connector</artifactId><version>${version}</version></project>\n`);
+    if (format === 'json') await writeFile(resolve(root, 'package.json'), JSON.stringify({ name: '@community/application', version }) + '\n');
+    else await writeFile(resolve(root, 'pom.xml'), `<project><modelVersion>4.0.0</modelVersion><groupId>example</groupId><artifactId>connector</artifactId><version>${version}</version></project>\n`);
     git(root, 'add', '.');
     git(root, 'commit', '-m', 'feat: initial connector');
     return root;
@@ -44,6 +45,41 @@ test('custom artifacts publish the stable version already committed in the POM',
 test('custom publication refuses a development source version on master', async (t) => {
     const root = await fixture(t, '1.0.0-dev');
     await assert.rejects(planArtifactVersion({ root }), /stable X.Y.Z/);
+});
+
+test('custom artifacts use the stable package.json version already prepared on master', async (t) => {
+    const root = await fixture(t, '0.0.1', 'json');
+    const selected = await planArtifactVersion({ root });
+    assert.equal(selected.plan.version, '0.0.1');
+    assert.equal(selected.source_version, true);
+    git(root, 'tag', 'v0.0.1');
+    await writeFile(resolve(root, 'package.json'), '{\n  "name": "@community/application", "version": "0.0.2"\n}\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'fix: update application');
+    assert.equal((await planArtifactVersion({ root })).plan.version, '0.0.2');
+    await assert.rejects(planArtifactVersion({ root, version: '1.0.0' }), /differs from the stable source/);
+});
+
+test('custom package artifacts cannot publish an unprepared development version', async (t) => {
+    const root = await fixture(t, '0.0.1-dev', 'json');
+    const before = git(root, 'rev-parse', 'HEAD');
+    await assert.rejects(planArtifactVersion({ root }), /stable X.Y.Z/);
+    assert.equal(git(root, 'rev-parse', 'HEAD'), before);
+    assert.equal(git(root, 'status', '--porcelain'), '');
+});
+
+test('artifact planning preserves manifest and Maven priority over frontend package metadata', async (t) => {
+    const root = await fixture(t, '1.2.3');
+    const frontend = '{"name":"frontend-assets","version":"0.0.1-dev"}\n';
+    await writeFile(resolve(root, 'package.json'), frontend);
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'chore: add frontend build metadata');
+    assert.equal((await planArtifactVersion({ root })).plan.version, '1.2.3');
+    await writeFile(resolve(root, 'manifest.json'), '{"version":"2.0.0"}\n');
+    git(root, 'add', '.');
+    git(root, 'commit', '-m', 'feat: configure package manifest');
+    assert.equal((await planArtifactVersion({ root })).plan.version, '2.0.0');
+    assert.equal(await readFile(resolve(root, 'package.json'), 'utf8'), frontend);
 });
 
 test('custom asset collection hashes sorted files and preserves an existing reserved bundle', async (t) => {

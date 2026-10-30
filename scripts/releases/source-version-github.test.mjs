@@ -8,7 +8,7 @@ const repository = 'Kraftink-CMS/Example';
 const prefix = `/repos/${repository}`;
 const digest = (value) => createHash('sha1').update(JSON.stringify(value)).digest('hex');
 
-function fixture(version = '1.0.0-dev') {
+function fixture(version = '1.0.0-dev', metadataPath = 'manifest.json') {
     const trees = new Map();
     const blobs = new Map();
     const commits = new Map();
@@ -34,7 +34,7 @@ function fixture(version = '1.0.0-dev') {
         commits.set(sha, { sha, tree: { sha: tree }, parents: parents.map((sha) => ({ sha })), message });
         return sha;
     }
-    const original = addCommit({ 'manifest.json': `{\r\n    "version": "${version}",\r\n    "name": "Sample"\r\n}\r\n`,
+    const original = addCommit({ [metadataPath]: `{\r\n    "version": "${version}",\r\n    "name": "Sample"\r\n}\r\n`,
         'code.php': '<?php echo "initial";\n' });
     heads.dev = original;
     heads.master = original;
@@ -146,10 +146,10 @@ test('a concurrent dev change is rejected without forcing or losing source', asy
 });
 
 test('source files cannot be symbolic links or invalid UTF-8', async () => {
-    for (const invalid of ['symlink', 'encoding']) {
-        const state = fixture();
+    for (const metadataPath of ['manifest.json', 'package.json']) for (const invalid of ['symlink', 'encoding']) {
+        const state = fixture('1.0.0-dev', metadataPath);
         const root = state.trees.get(state.commits.get(state.original).tree.sha);
-        const entry = root.tree.find((value) => value.path === 'manifest.json');
+        const entry = root.tree.find((value) => value.path === metadataPath);
         if (invalid === 'symlink') entry.mode = '120000';
         else {
             const bytes = Buffer.from([255]);
@@ -232,4 +232,41 @@ test('an older publication retry cannot alter a newer stable preparation on dev'
     assert.equal(result.changed, false);
     assert.equal(state.heads.dev, pending);
     assert.match(state.content(pending)['manifest.json'], /"2\.0\.0"/);
+});
+
+test('package.json follows common remote planning, exact stable preparation and idempotent dev advancement', async () => {
+    const state = fixture('0.0.1-dev', 'package.json');
+    const plan = await planSourceVersion({ ...state, repository, sourceSha: state.original });
+    assert.equal(plan.version, '0.0.1');
+    const before = state.content(state.original)['package.json'];
+    const stable = await updateSourceVersion({ ...state, repository, branch: 'dev', version: plan.version,
+        expectedSha: state.original, validationContext: 'checks / Validate changes' });
+    assert.equal(state.content(stable.sha)['package.json'], before.replace('0.0.1-dev', '0.0.1'));
+    assert.equal(state.content(stable.sha)['code.php'], state.content(state.original)['code.php']);
+    await verifyPreparedSourceVersion({ ...state, repository, originSha: state.original, preparedSha: stable.sha, version: '0.0.1' });
+    const master = state.addCommit(state.content(stable.sha), [state.original, stable.sha], 'Merge release');
+    state.heads.master = master;
+    const newer = state.addCommit({ ...state.content(stable.sha), 'code.php': '<?php echo "new development";' }, [stable.sha]);
+    state.heads.dev = newer;
+    const next = await advanceDevelopmentVersion({ ...state, repository, version: '0.0.1', releaseSha: master, sourceSha: stable.sha });
+    assert.equal(state.content(next.sha)['package.json'], before.replace('0.0.1-dev', '0.0.2-dev'));
+    assert.equal(state.content(next.sha)['code.php'], '<?php echo "new development";');
+    assert.deepEqual(state.commits.get(next.sha).parents, [{ sha: newer }, { sha: master }]);
+    assert.equal((await advanceDevelopmentVersion({ ...state, repository, version: '0.0.1',
+        releaseSha: master, sourceSha: stable.sha })).changed, false);
+    assert.equal(state.content(master)['package.json'], before.replace('0.0.1-dev', '0.0.1'));
+});
+
+test('package preparation rejects concurrent dev changes and non-version JSON mutations', async () => {
+    const state = fixture('0.0.1-dev', 'package.json');
+    const stable = await updateSourceVersion({ ...state, repository, branch: 'dev', version: '0.0.1' });
+    const altered = state.addCommit({ ...state.content(stable.sha),
+        'package.json': state.content(stable.sha)['package.json'].replace('Sample', 'Unreviewed application') }, [state.original]);
+    await assert.rejects(verifyPreparedSourceVersion({ ...state, repository,
+        originSha: state.original, preparedSha: altered, version: '0.0.1' }), /version-only/);
+    const current = state.heads.dev;
+    const previousCalls = state.calls.length;
+    await assert.rejects(updateSourceVersion({ ...state, repository, branch: 'dev', version: '0.0.2-dev', expectedSha: state.original }), /advanced/);
+    assert.equal(state.heads.dev, current);
+    assert.equal(state.calls.slice(previousCalls).some((call) => call.method !== 'GET'), false);
 });

@@ -1,7 +1,7 @@
 {
     "schema": 1,
     "organization": "Kraftink-CMS",
-    "excluded_repositories": ["kraftink.com", "automation"],
+    "excluded_repositories": ["automation"],
     "policies": [
         {
             "id": "common",

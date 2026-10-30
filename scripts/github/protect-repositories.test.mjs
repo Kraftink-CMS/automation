@@ -515,6 +515,7 @@ test('the saved configuration applies product protections without touching exclu
         await readFile(new URL('../../.github/repository-protection.json', import.meta.url), 'utf8'),
     );
     const excluded = config.excluded_repositories;
+    assert.ok(!excluded.some((name) => name.toLowerCase() === 'kraftink.com'));
     const appId = 987654;
     const transport = api({
         repositories: [
@@ -584,6 +585,7 @@ test('caller release permissions and the Actions validation requirement are limi
     for (const [name, enabled, source, fork] of [
         ['Plugin-Sample', true, null, false],
         ['Custom-Release', true, requestWorkflow, false],
+        ['kraftink.com', true, requestWorkflow, false],
         ['Custom-OptOut', false, null, false],
         ['Custom-Edited', false, requestWorkflow.replace('contents: write', 'contents: read'), false],
         ['Kraftink', true, null, false],

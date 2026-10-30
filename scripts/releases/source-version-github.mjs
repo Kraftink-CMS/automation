@@ -188,7 +188,7 @@ export async function planSourceVersion({ client, repository, sourceSha, bump = 
     const path = options(client, repository);
     const source = await commit(client, path, sourceSha);
     const read = sourceReader(client, path, source.tree.sha);
-    if (await read('manifest.json') === null && await read('pom.xml') === null) return null;
+    if (await read('manifest.json') === null && await read('pom.xml') === null && await read('package.json') === null) return null;
     const metadata = await inspectSourceVersion({ read });
     const initial = metadata.version.replace(/-(?:dev|SNAPSHOT)$/, '');
     stableVersion(initial);

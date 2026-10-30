@@ -75,13 +75,36 @@ test('master protection readiness follows stable profile identities independentl
     assert.equal(protectionsReady(anchors.map((entry) => ({ ...entry, confirmed: false }))), false);
 });
 
+test('empty public repositories wait for bootstrap before any protection or release workflow mutation', async () => {
+    const config = JSON.parse(await readFile(new URL('../../.github/repository-protection.json', import.meta.url), 'utf8'));
+    const metadata = { id: 88, name: 'kraftink.com', full_name: 'Kraftink-CMS/kraftink.com',
+        owner: { login: 'Kraftink-CMS', type: 'Organization' }, private: false, visibility: 'public',
+        archived: false, disabled: false, fork: false, size: 0, default_branch: 'master' };
+    const calls = [];
+    const client = { authenticated: true, async request(method, path) {
+        calls.push({ method, path });
+        assert.equal(method, 'GET');
+        if (path.startsWith('/orgs/Kraftink-CMS/repos')) return [metadata];
+        if (path === '/repos/Kraftink-CMS/kraftink.com') return metadata;
+        if (path === '/repos/Kraftink-CMS/kraftink.com/git/ref/heads/master')
+            throw Object.assign(new Error('Git repository is empty'), { status: 409 });
+        throw new Error(`Unexpected ${method} ${path}`);
+    } };
+    const report = await governRepositories({ config, client, appId: 123, appSlug });
+    assert.equal(report.failed, 0);
+    assert.deepEqual(report.workflows, []);
+    assert.equal(report.protections.results[0].action, 'skipped');
+    assert.ok(calls.every((call) => call.method === 'GET'));
+});
+
 test('custom repositories bootstrap their wrapper while independent validated publishers keep only native protection', async () => {
     const saved = JSON.parse(await readFile(new URL('../../.github/repository-protection.json', import.meta.url), 'utf8'));
     const configured = validateConfiguration(saved, { appId: 123 });
     for (const name of ['Custom-Assets', 'KraftInk']) {
         const repository = `Kraftink-CMS/${name}`;
         const metadata = { id: 88, name, full_name: repository, owner: { login: 'Kraftink-CMS', type: 'Organization' },
-            private: false, visibility: 'public', archived: false, disabled: false, fork: false, allow_merge_commit: true };
+            private: false, visibility: 'public', archived: false, disabled: false, fork: false, allow_merge_commit: true,
+            ...(name === 'Custom-Assets' ? { size: 0, default_branch: 'master' } : {}) };
         const rulesets = selectPolicies(configured, name).flatMap((policy) => policy.rulesets).map((desired, index) => {
             const { previous_names, ...ruleset } = desired;
             if (ruleset.name === 'App-only master merges') {

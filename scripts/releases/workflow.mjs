@@ -89,15 +89,19 @@ function checkout(root, sha) {
 }
 
 function sourceDetails(root, sha) {
+    const deployment = git(root, ['ls-tree', sha, '--', '.github/workflows/deploy.yml']);
+    if (deployment && !/^100(?:644|755) blob [a-f0-9]{40}\t\.github\/workflows\/deploy\.yml$/.test(deployment))
+        throw new Error('The optional deployment workflow must be a regular committed file.');
+    const hooks = deployment ? { deployment: 'deploy.yml' } : {};
     const custom = git(root, ['ls-tree', sha, '--', '.github/actions/build/action.yml']);
     if (custom) {
         if (!/^100(?:644|755) blob [a-f0-9]{40}\t\.github\/actions\/build\/action\.yml$/.test(custom))
             throw new Error('The custom build action must be a regular committed file.');
-        return { kind: 'custom', manifest: null };
+        return { kind: 'custom', manifest: null, ...hooks };
     }
     const manifest = manifestFor(git(root, ['show', `${sha}:manifest.json`]));
     if (manifest.builtin === true) throw new Error('Bundled extensions are published with the CMS.');
-    return { kind: 'extension', manifest };
+    return { kind: 'extension', manifest, ...hooks };
 }
 
 export async function describeSource(root) {
@@ -189,7 +193,7 @@ function blockedRelease(repository, number) {
 async function previousPublication(root, client) {
     const master = await reference(client, 'master');
     git(root, ['fetch', '--no-tags', 'origin', master]);
-    if (!git(root, ['ls-tree', '--name-only', master, '--', 'manifest.json', 'pom.xml'])) return;
+    if (!git(root, ['ls-tree', '--name-only', master, '--', 'manifest.json', 'pom.xml', 'package.json'])) return;
     const metadata = await inspectSourceVersion({ root, sha: master });
     if (metadata.version.endsWith('-dev') || metadata.version.endsWith('-SNAPSHOT')) return;
     stableVersion(metadata.version);
@@ -274,6 +278,7 @@ async function readContext({ root, client, environment, directory }) {
             || !Array.isArray(context.actors) || context.actors.length !== 2
             || !['auto', 'patch', 'minor', 'major'].includes(context.bump)
             || !['extension', 'custom'].includes(context.kind) || !Array.isArray(context.history) || context.history.length > 100
+            || context.deployment !== undefined && context.deployment !== 'deploy.yml'
             || context.plan?.schema !== 1 || context.plan.mode !== 'stable' || context.plan.branch !== 'master'
             || context.plan.sha !== context.source_sha || context.plan.tag !== `v${context.plan.version}`
             || typeof context.plan.create_tag !== 'boolean')
@@ -288,7 +293,8 @@ async function readContext({ root, client, environment, directory }) {
             || !isDeepStrictEqual(await jsonFile(resolve(directory, 'history.json')), context.history))
         throw new Error('The build inputs differ from the prepared release context.');
     if (git(root, ['rev-parse', 'HEAD']) !== context.source_sha || git(root, ['rev-parse', 'HEAD^{tree}']) !== context.source_tree_sha
-            || !isDeepStrictEqual(sourceDetails(root, context.source_sha), { kind: context.kind, manifest: context.manifest })
+            || !isDeepStrictEqual(sourceDetails(root, context.source_sha), { kind: context.kind, manifest: context.manifest,
+                ...(context.deployment ? { deployment: context.deployment } : {}) })
             || (await inspectSourceVersion({ root, sha: context.source_sha })).version !== context.plan.version)
         throw new Error('The selected source does not match the prepared release.');
     const prepared = await verifyPreparedSourceVersion({ client: absoluteClient(client, identity.repository),
@@ -434,6 +440,14 @@ export async function publishRelease({ root, client, environment = process.env, 
     await advance({ client: absoluteClient(client, context.repository), repository: context.repository,
         version: context.plan.version, releaseSha: sha, sourceSha: context.source_sha,
         validationContext: 'checks / Validate changes' });
+    if (context.deployment) {
+        await access(client, environment, context);
+        await mergedSource(client, context, sha, number, wait);
+        await client.request('POST', '/dispatches', {
+            event_type: 'kraftink-release-published',
+            client_payload: { commit: sha, tag: context.plan.tag },
+        }, 204);
+    }
     return result;
 }
 
