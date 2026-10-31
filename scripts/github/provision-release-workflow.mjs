@@ -7,7 +7,7 @@ const filename = '.github/workflows/release.yml';
 const message = 'chore: configure extension release';
 const body = 'Configure the managed Release button. This pull request changes only .github/workflows/release.yml.';
 const expected = Buffer.from(requestWorkflow);
-const previousWorkflowBlob = '5aa9f4195e73d0efb84acdaea907cd6f78dde669';
+const previousWorkflowBlobs = new Set(['5aa9f4195e73d0efb84acdaea907cd6f78dde669', '65f0f46c02719fdaea275ef39e4e7636b10300e1']);
 const expectedBlob = createHash('sha1').update(`blob ${expected.length}\0`).update(expected).digest('hex');
 const validSha = (value) => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const validId = (value) => Number.isSafeInteger(value) && value > 0;
@@ -87,7 +87,7 @@ async function contents(client, repository, sha) {
     if (bytes.length > 262144 || bytes.toString('base64') !== encoded || value.sha !== shaValue) {
         throw new ProvisionError('The release workflow contents do not match their Git blob.');
     }
-    return { sha: value.sha, matches: bytes.equals(expected), managed: bytes.equals(expected) || value.sha === previousWorkflowBlob };
+    return { sha: value.sha, matches: bytes.equals(expected), managed: bytes.equals(expected) || previousWorkflowBlobs.has(value.sha) };
 }
 
 export async function managedReleaseOptIn({ client, repository }) {

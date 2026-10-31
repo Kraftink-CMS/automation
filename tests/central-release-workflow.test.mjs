@@ -44,7 +44,8 @@ test('the repository Release workflow requires its shared read-only build before
         assert.equal(checkout[0].with['persist-credentials'], false);
         assert.equal(job.steps.filter((step) => step.uses === 'Kraftink-CMS/automation@master').length, 1);
         for (const step of uploads(job)) assert.equal(step.with['retention-days'], 7);
-        assert.doesNotMatch(JSON.stringify(job), /secrets\.|KRAFTINK_AUTOMATION_PRIVATE_KEY|release-requested/);
+        assert.doesNotMatch(JSON.stringify(job), /KRAFTINK_AUTOMATION_PRIVATE_KEY|release-requested/);
+        if (name !== 'publish') assert.doesNotMatch(JSON.stringify(job), /secrets\./);
     }
     for (const job of [promote, publish]) {
         const context = downloads(job).filter((step) => step.with.path === '${{ runner.temp }}/release-context');
@@ -66,6 +67,11 @@ test('dev PRs call the same validation as releases with no publication token or 
     assert.deepEqual(wrapper.jobs.checks.permissions, { contents: 'read' });
     assert.equal(wrapper.jobs.checks.if, "github.event_name == 'pull_request'");
     assert.equal(wrapper.jobs.release.if, "github.event_name == 'workflow_dispatch'");
+    assert.deepEqual(wrapper.jobs.release.secrets, { KRAFTINK_MARKET_REFRESH_TOKEN: '${{ secrets.KRAFTINK_MARKET_REFRESH_TOKEN }}' });
+    assert.equal(wrapper.jobs.checks.secrets, undefined);
+    assert.deepEqual(callerWorkflow.on.workflow_call.secrets, { KRAFTINK_MARKET_REFRESH_TOKEN: { required: false } });
+    const publish = callerWorkflow.jobs.publish.steps.find((step) => step.name === 'Verify and publish the validated files');
+    assert.equal(publish.env.KRAFTINK_MARKET_REFRESH_TOKEN, '${{ secrets.KRAFTINK_MARKET_REFRESH_TOKEN }}');
     assert.equal(wrapper.jobs.checks.uses, 'Kraftink-CMS/automation/.github/workflows/validate-repository.yml@master');
     assert.equal(wrapper.jobs.checks.with, undefined);
     assert.equal(validationWorkflow.on.workflow_call.inputs.release.default, false);

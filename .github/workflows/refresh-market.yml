@@ -16,7 +16,7 @@ on:
           - all
         default: automatic
       repository:
-        description: owner/repository, required only for the repository scope
+        description: Optional automatic target, required for the repository scope
         type: string
         default: ''
       dry_run:
@@ -50,6 +50,7 @@ jobs:
           KRAFTINK_AUTOMATION_APP_ID: ${{ vars.KRAFTINK_AUTOMATION_APP_ID }}
           KRAFTINK_AUTOMATION_PRIVATE_KEY: ${{ secrets.KRAFTINK_AUTOMATION_PRIVATE_KEY }}
           KRAFTINK_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          KRAFTINK_SITE_CACHE_SECRET: ${{ secrets.KRAFTINK_SITE_CACHE_SECRET }}
           REQUESTED_REPOSITORY: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.repository || inputs.repository || '' }}
           REFRESH_SCOPE: ${{ github.event_name == 'workflow_dispatch' && inputs.scope || github.event_name == 'repository_dispatch' && 'notification' || 'automatic' }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { describeSource, prepareRelease, promoteRelease, publishRelease } from './workflow.mjs';
+import { buildBundle } from './build.mjs';
 
 const repository = 'Kraftink-CMS/Example';
 
@@ -169,7 +170,8 @@ async function fixture(t, kind = 'custom') {
     }, release(tag) { return this.request('GET', `/releases/tags/${tag}`); } };
     const environment = { GITHUB_REPOSITORY: repository, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/dev',
         GITHUB_RUN_ID: '100', GITHUB_RUN_ATTEMPT: '1', GITHUB_ACTOR: 'writer', GITHUB_TRIGGERING_ACTOR: 'rerunner' };
-    const options = { root, directory, assetsDirectory, client, environment, wait: async () => {} };
+    const options = { root, directory, assetsDirectory, client, environment, wait: async () => {},
+        notifyMarket: async () => ({ action: 'skipped' }) };
     return { ...options, state, git, serverGit, original, commit, createCommit, prepare: () => prepareRelease(options),
         promote: () => promoteRelease(options), context: async () => JSON.parse(await readFile(resolve(directory, 'context.json'), 'utf8')) };
 }
@@ -310,6 +312,34 @@ test('extension selection is based on its manifest while custom builds require a
     const context = await data.context();
     assert.equal(context.manifest.version, '1.0.0');
     assert.deepEqual(context.history, []);
+});
+
+test('extension catalogue refresh follows verified publication and can be retried without changing release assets', async (t) => {
+    const data = await fixture(t, 'extension');
+    const selected = await data.prepare();
+    const promoted = await data.promote();
+    const context = await data.context();
+    data.git('checkout', '--detach', selected.source_sha);
+    await buildBundle({ root: data.root, plan: context.plan, repository, directory: data.assetsDirectory });
+    const order = [];
+    const options = { ...data, environment: { ...data.environment, RELEASE_MERGE_SHA: promoted.merge_sha,
+        RELEASE_PULL_NUMBER: promoted.pull_number, KRAFTINK_MARKET_REFRESH_TOKEN: 'dispatch-token' },
+        publish: async () => { order.push('publication'); return { complete: true }; },
+        advance: async () => { order.push('development'); },
+        notifyMarket: async (input) => {
+            assert.equal(input.repository, repository);
+            assert.equal(input.environment.KRAFTINK_MARKET_REFRESH_TOKEN, 'dispatch-token');
+            order.push('catalogue');
+            return { action: 'refreshed' };
+        } };
+    const result = await publishRelease(options);
+    assert.equal(result.market.action, 'refreshed');
+    assert.deepEqual(order, ['publication', 'development', 'catalogue']);
+    order.length = 0;
+    await assert.rejects(publishRelease({ ...options, publish: async () => ({ complete: false }) }), /publication has not been verified/);
+    assert.deepEqual(order, []);
+    await assert.rejects(publishRelease({ ...options, notifyMarket: async () => { throw new Error('Catalogue unavailable'); } }), /Catalogue unavailable/);
+    assert.equal((await publishRelease(options)).market.action, 'refreshed');
 });
 
 test('verified publication advances dev through the real version helper while preserving the stable master source', async (t) => {

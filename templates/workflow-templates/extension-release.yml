@@ -29,6 +29,8 @@ jobs:
   release:
     if: github.event_name == 'workflow_dispatch'
     uses: Kraftink-CMS/automation/.github/workflows/request-extension-release.yml@master
+    secrets:
+      KRAFTINK_MARKET_REFRESH_TOKEN: ${{ secrets.KRAFTINK_MARKET_REFRESH_TOKEN }}
     with:
       bump: ${{ inputs.bump }}
       notes_mode: ${{ inputs.notes_mode }}

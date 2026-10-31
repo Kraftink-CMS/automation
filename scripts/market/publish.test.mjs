@@ -774,6 +774,12 @@ test('manual scope choices map exactly to global automatic, one forced registrat
         repository: null,
         scope: 'automatic',
     });
+    assert.deepEqual(parseMarketArguments(['--scope', 'automatic', 'community/Plugin-First']), {
+        check: false,
+        force: false,
+        repository: 'community/Plugin-First',
+        scope: 'automatic',
+    });
     assert.deepEqual(parseMarketArguments(['--scope', 'repository', 'community/Plugin-First']), {
         check: false,
         force: true,
@@ -798,7 +804,6 @@ test('manual scope choices map exactly to global automatic, one forced registrat
         ['--scope', 'invalid'],
         ['--scope', 'repository'],
         ['--scope', 'notification', ''],
-        ['--scope', 'automatic', 'community/Plugin-First'],
         ['--scope', 'all', 'community/Plugin-First'],
         ['--scope', 'all', '--scope', 'automatic'],
         ['--scope', 'repository', 'community/Plugin-First', 'community/Plugin-Second'],

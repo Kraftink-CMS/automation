@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { createAppClient } from '../github/app-auth.mjs';
 import { createGitHubClient } from '../github/protect-repositories.mjs';
 import { generateCatalogue, sourceResources } from './catalogue.mjs';
+import { MarketNotificationError, refreshSiteCache } from './notifications.mjs';
 
 const repository = 'Kraftink-CMS/Market';
 const prefix = `/repos/${repository}`;
@@ -563,7 +564,7 @@ export async function reconcileMarket({
             ),
         );
         const result = { repository, checked: generated.checked, failures: generated.failures.length };
-        if (!Object.keys(changes).length) return { ...result, action: 'unchanged' };
+        if (!Object.keys(changes).length) return { ...result, action: 'unchanged', merge_sha: master };
         if (check) return { ...result, action: 'planned', files: Object.keys(changes) };
         const snapshot = { client, repositoryId, dev, master };
         await protections(client, appId);
@@ -736,9 +737,9 @@ export function parseMarketArguments(args) {
                 'Use publish.mjs [--check] --scope automatic|repository|all|notification [owner/repository].',
             );
     }
-    if (['repository', 'notification'].includes(scope) ? repository === null : repository !== null)
+    if (['repository', 'notification'].includes(scope) && repository === null || scope === 'all' && repository !== null)
         throw new MarketPublicationError(
-            'Repository and notification scopes require one repository; automatic and all scopes accept none.',
+            'Repository and notification scopes require one repository; all scope accepts none.',
         );
     return { check, force: ['repository', 'all'].includes(scope), repository, scope };
 }
@@ -809,19 +810,23 @@ async function main() {
         appId: app.appId,
         appSlug: app.appSlug,
     });
+    if (!options.check && ['configured', 'unchanged'].includes(result.action))
+        result.site_cache = await refreshSiteCache({ commit: result.merge_sha, secret: process.env.KRAFTINK_SITE_CACHE_SECRET });
     process.stdout.write(JSON.stringify(result) + '\n');
     if (process.env.GITHUB_STEP_SUMMARY)
         await appendFile(
             process.env.GITHUB_STEP_SUMMARY,
-            `Market catalogue: **${result.action}**.${result.reason ? ` ${result.reason}` : ''}${result.pull_request ? ` [Pull request](${result.pull_request}).` : ''}\n`,
+            `Market catalogue: **${result.action}**.${result.reason ? ` ${result.reason}` : ''}${result.pull_request ? ` [Pull request](${result.pull_request}).` : ''}${result.failures ? ` ${result.failures} resource metadata fetch(es) failed.` : ''}\n`,
         );
-    if (result.action === 'failed' || (options.force && result.action === 'pending')) process.exitCode = 1;
+    if (result.action === 'failed' || (options.force || options.repository !== null)
+            && (result.action === 'pending' || result.failures > 0)) process.exitCode = 1;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-    main().catch(() => {
+    main().catch((error) => {
         process.stderr.write(
-            'The central Market refresh failed. Check the App access, repository protections and source registry.\n',
+            error instanceof MarketNotificationError ? `${error.message}\n`
+                : 'The central Market refresh failed. Check the App access, repository protections and source registry.\n',
         );
         process.exitCode = 1;
     });

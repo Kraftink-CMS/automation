@@ -9,6 +9,7 @@ import { inspectSourceVersion } from './source-version.mjs';
 import { buildReleaseNotes, normalizeReleaseNotes } from './notes.mjs';
 import { advanceDevelopmentVersion, updateSourceVersion, verifyPreparedSourceVersion } from './source-version-github.mjs';
 import { git, planVersion, stableVersion } from './version.mjs';
+import { notifyMarketRelease } from '../market/notifications.mjs';
 
 const validSha = (value) => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);
 const validId = (value) => Number.isSafeInteger(value) && value > 0;
@@ -402,7 +403,7 @@ async function customBundle(context, directory, sha) {
 }
 
 export async function publishRelease({ root, client, environment = process.env, directory, assetsDirectory,
-    publish = publishAssets, advance = advanceDevelopmentVersion, wait = pause }) {
+    publish = publishAssets, advance = advanceDevelopmentVersion, notifyMarket = notifyMarketRelease, wait = pause }) {
     const context = await readContext({ root, client, environment, directory });
     const sha = environment.RELEASE_MERGE_SHA;
     if (!validSha(sha)) throw new Error('The confirmed promotion SHA is required.');
@@ -447,6 +448,9 @@ export async function publishRelease({ root, client, environment = process.env, 
             event_type: 'kraftink-release-published',
             client_payload: { commit: sha, tag: context.plan.tag },
         }, 204);
+    }
+    if (context.kind === 'extension') {
+        result.market = await notifyMarket({ repository: context.repository, environment, wait });
     }
     return result;
 }

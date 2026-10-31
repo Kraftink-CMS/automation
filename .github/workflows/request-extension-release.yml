@@ -13,6 +13,9 @@ on:
         description: Optional Markdown message for append or replace
         type: string
         default: ''
+    secrets:
+      KRAFTINK_MARKET_REFRESH_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -126,7 +129,7 @@ jobs:
     name: Publish the stable release
     needs: [prepare, build, promote]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: read
@@ -160,6 +163,7 @@ jobs:
           RELEASE_DIRECTORY: ${{ runner.temp }}/release-context
           RELEASE_ASSETS: ${{ runner.temp }}/release-assets
           RELEASE_MERGE_SHA: ${{ needs.promote.outputs.merge_sha }}
+          KRAFTINK_MARKET_REFRESH_TOKEN: ${{ secrets.KRAFTINK_MARKET_REFRESH_TOKEN }}
           RELEASE_PULL_NUMBER: ${{ needs.promote.outputs.pull_number }}
           GITHUB_TOKEN: ${{ github.token }}
           KRAFTINK_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
