@@ -810,14 +810,20 @@ async function main() {
         appId: app.appId,
         appSlug: app.appSlug,
     });
-    if (!options.check && ['configured', 'unchanged'].includes(result.action))
+    if (!options.check && ['configured', 'unchanged'].includes(result.action)) {
         result.site_cache = await refreshSiteCache({ commit: result.merge_sha, secret: process.env.KRAFTINK_SITE_CACHE_SECRET });
+        if (!result.site_cache.refreshed)
+            process.stderr.write(`::warning::The catalogue is published, but its site cache refresh is deferred (${result.site_cache.status === null ? 'network failure' : `HTTP ${result.site_cache.status}`}, ${result.site_cache.code}). A later Refresh Market run will retry.\n`);
+    }
     process.stdout.write(JSON.stringify(result) + '\n');
     if (process.env.GITHUB_STEP_SUMMARY)
         await appendFile(
             process.env.GITHUB_STEP_SUMMARY,
             `Market catalogue: **${result.action}**.${result.reason ? ` ${result.reason}` : ''}${result.pull_request ? ` [Pull request](${result.pull_request}).` : ''}${result.failures ? ` ${result.failures} resource metadata fetch(es) failed.` : ''}\n`,
         );
+    if (process.env.GITHUB_STEP_SUMMARY && result.site_cache?.refreshed === false)
+        await appendFile(process.env.GITHUB_STEP_SUMMARY,
+            `Site cache: **deferred** (${result.site_cache.status === null ? 'network failure' : `HTTP ${result.site_cache.status}`}, ${result.site_cache.code}). The published catalogue remains available and a later refresh will retry.\n`);
     if (result.action === 'failed' || (options.force || options.repository !== null)
             && (result.action === 'pending' || result.failures > 0)) process.exitCode = 1;
 }
