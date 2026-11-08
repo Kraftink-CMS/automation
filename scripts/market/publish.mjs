@@ -116,6 +116,12 @@ function allowedWrite(method, suffix, body) {
             typeof body.body === 'string' &&
             body.body.length <= 16384
         );
+    if (method === 'DELETE')
+        return (
+            body === undefined &&
+            suffix.startsWith('/git/refs/heads/') &&
+            branchPattern.test(suffix.slice('/git/refs/heads/'.length))
+        );
     return (
         method === 'PUT' &&
         /^\/pulls\/[1-9][0-9]*\/merge$/.test(suffix) &&
@@ -151,7 +157,7 @@ export function createMarketClient({ token, transport = fetch, wait = pause }) {
                           : name === 'state'
                             ? value === 'open'
                             : name === 'base'
-                              ? value === 'master'
+                              ? value === 'master' || branchPattern.test(value)
                               : name === 'head'
                                 ? value.startsWith('Kraftink-CMS:') && branchPattern.test(value.slice(13))
                                 : false,
@@ -189,7 +195,7 @@ export function createMarketClient({ token, transport = fetch, wait = pause }) {
                     }
                     throw new MarketPublicationError('The GitHub Market request could not reach GitHub.');
                 }
-                if (response.status === expected) return responseJson(response);
+                if (response.status === expected) return expected === 204 ? null : responseJson(response);
                 await response.body?.cancel();
                 if (method === 'GET' && attempt < 2 && (response.status === 429 || response.status >= 500)) {
                     await wait(1000);
@@ -482,7 +488,30 @@ async function changedFiles(client, pull, expected) {
         );
 }
 
-async function confirmedMerge(client, state, wait, expectedSha = null) {
+async function cleanupMergedBranch(client, state) {
+    const { branch, head } = state;
+    try {
+        const current = await reference(client, branch, true);
+        if (current === null) return true;
+        if (current !== head) return false;
+
+        const [openAsHead, openAsBase] = await Promise.all([
+            inventory(client, `${prefix}/pulls?state=open&head=${encodeURIComponent(`Kraftink-CMS:${branch}`)}`),
+            inventory(client, `${prefix}/pulls?state=open&base=${encodeURIComponent(branch)}`),
+        ]);
+        if (openAsHead.length || openAsBase.length) return false;
+
+        const latest = await reference(client, branch, true);
+        if (latest === null) return true;
+        if (latest !== head) return false;
+        await client.request('DELETE', `${prefix}/git/refs/heads/${branch}`, undefined, 204);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+async function completePublication(client, state, result, wait, expectedSha = null) {
     for (let attempt = 0; attempt < 3; attempt++) {
         const pull = await client.request('GET', `${prefix}/pulls/${state.number}`);
         if (pull?.state === 'closed' && pull.merged_at) {
@@ -500,7 +529,13 @@ async function confirmedMerge(client, state, wait, expectedSha = null) {
                     'The Market merge does not preserve the exact approved JSON tree and history.',
                 );
             await identity(client, state.repositoryId);
-            return value.sha;
+            return {
+                ...result,
+                action: 'configured',
+                merge_sha: value.sha,
+                pull_request: `https://github.com/${repository}/pull/${state.number}`,
+                branch_cleanup: { branch: state.branch, removed: await cleanupMergedBranch(client, state) },
+            };
         }
         if (attempt < 2) await wait(1000);
     }
@@ -650,15 +685,8 @@ export async function reconcileMarket({
         await changedFiles(client, pull, expectedFiles);
         for (let attempt = 0; attempt < 7; attempt++) {
             pull = await client.request('GET', `${prefix}/pulls/${state.number}`);
-            if (pull?.state === 'closed' && pull.merged_at) {
-                const merge_sha = await confirmedMerge(client, state, wait);
-                return {
-                    ...result,
-                    action: 'configured',
-                    merge_sha,
-                    pull_request: `https://github.com/${repository}/pull/${state.number}`,
-                };
-            }
+            if (pull?.state === 'closed' && pull.merged_at)
+                return await completePublication(client, state, result, wait);
             pullIdentity(pull, state);
             if (pull.mergeable !== null || attempt === 6) break;
             await wait(5000);
@@ -690,19 +718,12 @@ export async function reconcileMarket({
             if (![403, 405, 409, 422].includes(error.status)) throw error;
             const observed = await client.request('GET', `${prefix}/pulls/${state.number}`);
             if (!observed?.merged_at) return pending();
-            const merge_sha = await confirmedMerge(client, state, wait);
-            return { ...result, action: 'configured', merge_sha };
+            return await completePublication(client, state, result, wait);
         }
         if (merged?.merged === false) return pending();
         if (merged?.merged !== true || !sha(merged.sha))
             throw new MarketPublicationError('GitHub did not confirm the Market merge.');
-        const merge_sha = await confirmedMerge(client, state, wait, merged.sha);
-        return {
-            ...result,
-            action: 'configured',
-            merge_sha,
-            pull_request: `https://github.com/${repository}/pull/${state.number}`,
-        };
+        return await completePublication(client, state, result, wait, merged.sha);
     } catch (error) {
         return {
             repository,
@@ -824,6 +845,9 @@ async function main() {
     if (process.env.GITHUB_STEP_SUMMARY && result.site_cache?.refreshed === false)
         await appendFile(process.env.GITHUB_STEP_SUMMARY,
             `Site cache: **deferred** (${result.site_cache.status === null ? 'network failure' : `HTTP ${result.site_cache.status}`}, ${result.site_cache.code}). The published catalogue remains available and a later refresh will retry.\n`);
+    if (process.env.GITHUB_STEP_SUMMARY && result.branch_cleanup?.removed === false)
+        await appendFile(process.env.GITHUB_STEP_SUMMARY,
+            `The catalogue was published. Temporary branch \`${result.branch_cleanup.branch}\` could not be safely removed.\n`);
     if (result.action === 'failed' || (options.force || options.repository !== null)
             && (result.action === 'pending' || result.failures > 0)) process.exitCode = 1;
 }

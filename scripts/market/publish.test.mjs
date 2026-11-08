@@ -252,9 +252,17 @@ function fixture({ frozen = false, before, after, large = false } = {}) {
                 state.refs.set(branch, call.body.sha);
                 value = { ref: call.body.ref, object: { type: 'commit', sha: call.body.sha } };
                 status = 201;
+            } else if (call.method === 'DELETE' && suffix.startsWith('/git/refs/heads/')) {
+                const branch = suffix.slice('/git/refs/heads/'.length);
+                assert.ok(state.pulls.some((pull) => pull.head.ref === branch && pull.merged_at));
+                assert.ok(state.refs.delete(branch));
+                return new Response(null, { status: 204 });
             } else if (call.method === 'GET' && suffix === '/pulls') {
-                const head = target.searchParams.get('head')?.split(':')[1];
-                value = state.pulls.filter((pull) => pull.state === 'open' && pull.head.ref === head);
+                const head = call.query.get('head')?.split(':')[1];
+                const base = call.query.get('base');
+                value = state.pulls.filter(
+                    (pull) => pull.state === 'open' && (!head || pull.head.ref === head) && (!base || pull.base.ref === base),
+                );
             } else if (call.method === 'POST' && suffix === '/pulls') {
                 const repo = { id: 9, full_name: repository };
                 const pull = {
@@ -351,7 +359,13 @@ test('full reconciliation publishes only the source README and generated catalog
     assert.equal(output['unreviewed.mjs'], undefined);
     assert.equal(data.state.refs.get('dev'), data.dev);
     assert.equal(data.state.pulls.length, 1);
-    assert.ok(writes(data.state).every((call) => ['POST', 'PUT'].includes(call.method)));
+    const branch = data.state.pulls[0].head.ref;
+    assert.deepEqual(result.branch_cleanup, { branch, removed: true });
+    assert.equal(data.state.refs.has(branch), false);
+    assert.deepEqual(
+        writes(data.state).filter((call) => call.method === 'DELETE').map((call) => call.suffix),
+        [`/git/refs/heads/${branch}`],
+    );
     assert.ok(
         writes(data.state)
             .filter((call) => call.suffix === '/git/refs')
@@ -360,6 +374,37 @@ test('full reconciliation publishes only the source README and generated catalog
     const before = writes(data.state).length;
     assert.equal((await data.execute()).action, 'unchanged');
     assert.equal(writes(data.state).length, before);
+});
+
+test('branch cleanup keeps the publication successful when a branch must be retained', async (context) => {
+    for (const reason of ['changed', 'open head', 'open base', 'delete rejected']) {
+        await context.test(reason, async () => {
+            const data = fixture({
+                before(call, state) {
+                    const pull = state.pulls[0];
+                    if (!pull?.merged_at) return;
+                    const branch = pull.head.ref;
+                    const usesHead = call.query.get('head') === `Kraftink-CMS:${branch}`;
+                    const usesBase = call.query.get('base') === branch;
+                    if (reason === 'changed' && usesBase) state.refs.set(branch, state.refs.get('master'));
+                    if ((reason === 'open head' && usesHead) || (reason === 'open base' && usesBase))
+                        return Response.json([{}]);
+                    if (reason === 'delete rejected' && call.method === 'DELETE')
+                        return Response.json({}, { status: 403 });
+                },
+            });
+            const result = await data.execute();
+            const branch = data.state.pulls[0].head.ref;
+            assert.equal(result.action, 'configured');
+            assert.equal(result.merge_sha, data.state.refs.get('master'));
+            assert.deepEqual(result.branch_cleanup, { branch, removed: false });
+            assert.ok(data.state.refs.has(branch));
+            assert.equal(
+                writes(data.state).filter((call) => call.method === 'DELETE').length,
+                reason === 'delete rejected' ? 1 : 0,
+            );
+        });
+    }
 });
 
 test('a notification fetches only its selected repository and publishes only catalogue.json', async () => {
@@ -493,6 +538,7 @@ test('a dry manual all plan performs no mutation and a blocked all import is res
         pending.reason,
         /Rerun Refresh Market manually with scope all.*automatic refreshes preserve paused registrations/,
     );
+    assert.ok(data.state.refs.has(data.state.pulls[0].head.ref));
     const before = writes(data.state).length;
     data.state.blocked = null;
     assert.equal((await data.execute({ force: true })).action, 'configured');
@@ -501,7 +547,7 @@ test('a dry manual all plan performs no mutation and a blocked all import is res
         writes(data.state)
             .slice(before)
             .map((call) => call.method),
-        ['PUT'],
+        ['PUT', 'DELETE'],
     );
 });
 
@@ -555,7 +601,7 @@ test('native merge refusals leave one reusable App PR pending and never bypass r
                 writes(data.state)
                     .slice(before)
                     .map((call) => call.method),
-                ['PUT'],
+                ['PUT', 'DELETE'],
             );
         });
 });
@@ -651,6 +697,7 @@ test('source, identity, staged branch and pull-request races prevent an unverifi
                 },
             });
             assert.equal((await data.execute()).action, 'failed');
+            assert.ok(writes(data.state).every((call) => call.method !== 'DELETE'));
             if (kind !== 'merge-tree') assert.equal(data.state.refs.get('master'), data.master);
         });
 });
@@ -692,6 +739,9 @@ test('the fixed Market transport rejects arbitrary paths and writes and retries 
         ['POST', `${prefix}/git/refs`, { ref: 'refs/heads/master', sha: 'a'.repeat(40) }],
         ['PUT', `${prefix}/pulls/1/merge`, { sha: 'a'.repeat(40), merge_method: 'squash' }],
         ['DELETE', `${prefix}/git/refs/heads/dev`],
+        ['DELETE', `${prefix}/git/refs/heads/master`],
+        ['DELETE', `${prefix}/git/refs/heads/automation/market-unsafe`],
+        ['DELETE', `${prefix}/git/refs/heads/automation/market-${'a'.repeat(12)}-${'b'.repeat(12)}`, {}],
         [
             'POST',
             `${prefix}/git/trees`,
