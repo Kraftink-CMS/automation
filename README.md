@@ -1,61 +1,63 @@
 # KraftInk Automation
 
-Outils communs de publication pour les plugins, thèmes, modules de jeu et projets personnalisés de Kraftink-CMS.
+Shared release tooling for Kraftink-CMS plugins, themes, game modules, and projects with custom builds.
 
-## Publier une version
+## Publish a release
 
-1. Poussez vos changements sur `dev`.
-2. Dans votre dépôt, ouvrez **Actions → Release → Run workflow**.
-3. Choisissez `auto`, `patch`, `minor` ou `major`, puis lancez la publication.
+1. Push your changes to `dev`.
+2. In your repository, open **Actions → Release → Run workflow**.
+3. Choose `auto`, `patch`, `minor`, or `major` and run the workflow.
 
-Un droit d’écriture sur votre dépôt suffit. Vous n’avez besoin d’aucun droit sur le dépôt `automation` ni de jeton personnel.
+Write access to your project repository is enough to start a release. The workflow uses GitHub’s built-in token.
 
-L’automatisation installe le bouton **Release** et les protections du dépôt. Pour un nouveau projet, cette installation attend le prochain passage du contrôleur. Les plugins, thèmes et jeux indépendants sont reconnus par leurs noms `Plugin-*`, `Theme-*` et `Game-*`.
+The scheduled repository controller installs the **Release** workflow and branch protections. New projects are set up on its next run. The controller recognizes standalone plugins, themes, and game modules by the repository name patterns `Plugin-*`, `Theme-*`, and `Game-*`.
 
-Le wrapper **Release** installé automatiquement est la seule configuration GitHub Actions nécessaire aux plugins, thèmes et jeux standards. Une action locale `.github/actions/build/action.yml` est réservée aux constructions personnalisées, comme Maven pour KraftLink.
+The installed **Release** wrapper provides the GitHub Actions configuration for standard plugins, themes, and game modules. Projects with a custom build, such as KraftLink’s Maven build, also supply `.github/actions/build/action.yml`.
 
-Ce wrapper vérifie aussi les PR vers `dev`, sans publication ni artifact conservé. La PR et la release réutilisent les mêmes validations. Le résultat requis **checks / Validate changes** bloque la fusion sur `dev` en cas d’échec. Les rôles GitHub **Maintain** et **Admin** peuvent forcer cette règle et pousser directement sur `dev`. La release conserve son blocage automatique en cas d’échec, même pour un mainteneur. Les commits techniques de version sont validés comme des changements de métadonnées uniquement.
+The wrapper runs the same validation for pull requests targeting `dev` and for releases. Pull request builds use temporary files. The required **checks / Validate changes** check blocks merges into `dev` on failure. Users with the GitHub **Maintain** or **Admin** role can bypass that branch rule and push directly to `dev`. Release validation must pass for every user. The automation verifies that version-only commits change only release metadata.
 
-Pour ajouter des tests, versionnez une action composite facultative `.github/actions/test/action.yml`. La validation commune l’exécute avant le build des PR et des releases, avec un jeton en lecture seule. Cette action place ses étapes à la racine du projet (`${{ github.action_path }}/../../..`), installe son environnement et lance les commandes choisies (`npm test`, PHPUnit, etc.), sans framework imposé ; un échec bloque la validation. Sans tests, aucun fichier n’est requis. Le build Maven de KraftLink exécute déjà ses tests éventuels.
+To run project tests, add the optional composite action `.github/actions/test/action.yml`. Shared validation runs it before the build for pull requests and releases, using a read-only token. Set the working directory to the project root (`${{ github.action_path }}/../../..`), install the test environment, and run the commands your project uses, such as `npm test` or PHPUnit. A failing test blocks validation. KraftLink’s Maven build already runs its tests.
 
-Une fois le bouton présent, chaque lancement prépare la version stable sur `dev` et ouvre sa PR vers `master` avant le build. Un job en lecture seule valide et construit les fichiers, puis le workflow fusionne la PR validée et publie la release. Toutes ces étapes s’exécutent dans votre dépôt, sans attendre le contrôleur central. Un échec du build laisse la PR ouverte et empêche la fusion et la publication. Une nouvelle demande est refusée tant qu’une PR de release reste ouverte, avec un lien vers celle-ci.
+Each release run prepares the stable version on `dev` and opens a pull request into `master` before the build. A read-only job validates the source and builds the files. The workflow then merges the validated pull request and publishes the release. These steps run in your project repository. If the build fails, the pull request stays open and publication stops. A new release request is blocked while a release pull request is open, and the workflow links to it.
 
-La première version reprend le numéro du manifeste sans son suffixe de développement. Les suivantes suivent les Conventional Commits avec `auto`, ou le niveau choisi explicitement. La politique `.github/release-policy.json` reste facultative.
+By default, the first stable release uses the version declared by the project, with the development suffix removed. For later releases, `auto` uses Conventional Commits to choose the version bump. You can also choose a bump explicitly. The `.github/release-policy.json` file is optional.
 
-Le formulaire propose aussi `notes_mode` et le champ Markdown `notes` :
+Use `notes_mode` to choose how the workflow uses the Markdown `notes` field.
 
-- `auto` génère la liste des commits. Laissez `notes` vide.
-- `append` place votre message avant la liste automatique.
-- `replace` utilise uniquement votre message.
+- `auto` generates the commit list. Leave `notes` empty.
+- `append` puts your message before the generated list.
+- `replace` uses your message as the complete release notes.
 
-`append` et `replace` exigent un message, limité à 8 Kio en UTF-8. La liste automatique part de la précédente stable, avec au plus 100 commits et un lien de comparaison. Elle écarte les bots, les fusions et les commits techniques de métadonnées. La reprise des jobs échoués conserve les notes préparées et ne remplace pas celles d’une release déjà publiée. Les mêmes options s’appliquent aux constructions personnalisées.
+`append` and `replace` require a message of up to 8 KiB in UTF-8. The generated list includes up to 100 commits since the previous stable release, plus a comparison link. It excludes bot, merge, and release metadata commits. Rerunning failed jobs keeps the prepared notes and preserves the notes of an already published release. Custom builds use the same options.
 
-`master` porte la version stable publiée. Après publication, `dev` passe au patch suivant avec le suffixe `-dev`. Faites un `git pull` avant de continuer vos modifications.
+`master` holds the published stable version. After publication, `dev` advances to the next patch version with the `-dev` suffix. Run `git pull` before continuing development.
 
-Pour une erreur temporaire sur la même source, utilisez **Re-run failed jobs** dans l’exécution **Release** concernée. Pour corriger le code avant fusion, poussez la correction sur `dev`, puis utilisez **Re-run all jobs** dans cette même exécution : la source est préparée à nouveau et le build entier est refait, en conservant la version choisie. Changer de cible demande de fermer la PR puis de lancer une nouvelle **Release**. Une publication interrompue après fusion doit aussi être terminée avant la suivante. Le contexte et les artifacts temporaires sont conservés sept jours. Les fichiers déjà publiés restent immuables. Le Market se met à jour au passage suivant de son actualisation automatique.
+For a temporary error on the same source, use **Re-run failed jobs** in the original **Release** run. To fix the code before the merge, push the fix to `dev` and use **Re-run all jobs** in that same run. This prepares the source again and rebuilds it with the version already selected. To change the target version, close the pull request and start a new **Release** run. Finish any publication interrupted after its merge before starting the next release.
 
-## Publier des fichiers personnalisés
+The workflow retains the release context and temporary artifacts for seven days. Published files are immutable. The Market picks up the release on its next refresh.
 
-Pour utiliser le même bouton avec votre propre build :
+## Publish custom build files
 
-1. Placez le [wrapper Release](templates/workflow-templates/extension-release.yml) dans `.github/workflows/release.yml` sur `dev`.
-2. Ajoutez une action composite `.github/actions/build/action.yml` recevant les entrées `version` et `output-directory`.
-3. Dans cette action, installez votre environnement et construisez les fichiers dans le dossier absolu `output-directory` fourni.
+To use the same **Release** workflow with a custom build, set up these files on `dev`.
 
-La même action vérifie les PR vers `dev` avec la version courante des sources, éventuellement suffixée `-dev`. Pour une release, elle reçoit la version stable préparée. Les fichiers construits sur une PR restent temporaires dans le runner.
+1. Copy the [Release wrapper](templates/workflow-templates/extension-release.yml) to `.github/workflows/release.yml`.
+2. Add a composite action at `.github/actions/build/action.yml` with the `version` and `output-directory` inputs.
+3. In that action, set up the build environment and write the release files to the supplied absolute `output-directory`.
 
-Le contrôleur installe le bouton sur `master`. Le lancement suivant récupère la source stable préparée et exécute votre action de build avec un jeton en lecture seule. L’automatisation conserve la gestion des versions, de la PR, des sommes de contrôle et de la publication. Aucun secret d’organisation ni script de publication local n’est nécessaire.
+Pull requests targeting `dev` use the current source version, which may end in `-dev`. Releases use the prepared stable version. Files built for a pull request stay in the runner’s temporary storage.
 
-Les dépôts utilisant ce bouton exigent une PR vers `master` et le statut GitHub Actions `Release validated source`. Le workflow publie ce statut après le build et la vérification de la source. Un contributeur disposant des droits d’écriture peut aussi fusionner une PR déjà validée ou modifier les workflows du dépôt. Les protections contre les suppressions et les modifications forcées de `master` restent actives.
+The controller installs the **Release** workflow on `master`. The next run checks out the prepared stable source and runs your build action with a read-only token. Automation handles the version, release pull request, checksums, and publication.
 
-L’action `Kraftink-CMS/automation@master` expose aussi les opérations réutilisables suivantes pour un workflow existant :
+These repositories require a pull request and the GitHub Actions status `Release validated source` to merge into `master`. The workflow posts that status after building and verifying the source. Contributors with write access can also merge a validated pull request or edit the repository’s workflows. Branch protection prevents force pushes and deletion of `master`.
 
-- `operation: plan` renvoie `version` et `plan-path`.
-- `operation: publish` reçoit ce `plan-path`, le dossier `artifacts-path` et le `github-token` du workflow, avec les permissions `contents: write` et `statuses: write` pour ouvrir le prochain cycle de développement.
+An existing workflow can also call `Kraftink-CMS/automation@master` directly.
 
-## Développement
+- `operation: plan` returns `version` and `plan-path`.
+- `operation: publish` takes that `plan-path`, the `artifacts-path` directory, and the workflow’s `github-token`. Grant the token `contents: write` and `statuses: write` so the action can publish the release and start the next development cycle.
 
-Prérequis : Node.js 24, PHP 8.5, Composer 2 et Git.
+## Development
+
+Local development requires Node.js 24, PHP 8.5, Composer 2, and Git.
 
 ```shell
 npm ci --ignore-scripts
