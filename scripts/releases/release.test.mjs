@@ -215,9 +215,13 @@ async function fixture(context, type = 'plugin') {
     git('config', 'user.name', 'Package tests');
     git('config', 'user.email', 'package-tests@example.invalid');
     await mkdir(resolve(root, '.github'), { recursive: true });
+    await mkdir(resolve(root, 'config'));
     await mkdir(resolve(root, 'src'));
     const games = type === 'plugin' ? manifest.games : undefined;
     await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ ...manifest, type, games }));
+    await writeFile(resolve(root, 'config/example.php'), "<?php return ['enabled' => true];\n");
+    await writeFile(resolve(root, 'config/.env'), 'PRIVATE=excluded');
+    await writeFile(resolve(root, 'config/local.json'), '{}');
     await writeFile(resolve(root, 'src/example.php'), '<?php return true;\n');
     await writeFile(
         resolve(root, '.github/release-policy.json'),
@@ -282,6 +286,9 @@ for (const type of ['plugin', 'theme', 'game']) {
         assert.equal(JSON.parse(files.get('manifest.json')).type, type);
         assert.equal(files.has('.env'), false);
         assert.equal(files.has('.github/release-policy.json'), false);
+        assert.equal(files.has('config/.env'), false);
+        assert.equal(files.has('config/local.json'), false);
+        assert.equal(files.get('config/example.php').toString(), "<?php return ['enabled' => true];\n");
         assert.equal(files.get('src/example.php').toString(), '<?php return true;\n');
         assert.equal(built.metadata.download.sha256, digest(bytes));
         assert.equal(built.metadata.versions[0].version, plan.version);

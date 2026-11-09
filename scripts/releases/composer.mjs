@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const helper = fileURLToPath(new URL('./composer.php', import.meta.url));
 const tools = fileURLToPath(new URL('./php-scoper/vendor', import.meta.url));
-const runtimePath = /^(?:src|routes|database|lang|resources|views|public)\//;
+const runtimePath = /^(?:src|routes|config|database|lang|resources|views|public)\//;
 
 function execute(binary, args, options) {
     return execFileSync(binary, args, {

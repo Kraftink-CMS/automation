@@ -13,7 +13,7 @@ import { gameCompatibility, validateMarketSupport, validatePresentation } from '
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const allowedRoot =
     /^(?:manifest\.json|composer\.(?:json|lock)|(?:LICENSE|NOTICE|README)(?:[.-][A-Za-z0-9_.-]+)?|_[A-Za-z0-9_.-]+\.scss)$/;
-const allowedDirectory = /^(?:database|lang|public|resources|routes|src|views)\//;
+const allowedDirectory = /^(?:(?:database|lang|public|resources|routes|src|views)\/|config\/.+\.php$)/;
 
 export function assertPackageLimits({ files, extracted, archive = 0 }) {
     if (files > 10000 || extracted > 104857600 || archive > 52428800) {
