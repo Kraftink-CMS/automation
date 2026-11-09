@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { git, stableVersion } from './version.mjs';
 import { buildComposer } from './composer.mjs';
-import { validateMarketSupport, validatePresentation, validateSupportedGames } from '../market/catalogue.mjs';
+import { gameCompatibility, validateMarketSupport, validatePresentation } from '../market/catalogue.mjs';
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const allowedRoot =
@@ -285,7 +285,7 @@ export function manifestFor(raw) {
         description: market.description ?? manifest.description,
         ...(Object.hasOwn(market, 'image') ? { image: market.image } : {}),
     }, true);
-    validateSupportedGames(manifest.supported_games, manifest.type);
+    gameCompatibility(manifest, manifest.type);
     validateMarketSupport(market.support);
     constraints(manifest.requires, true);
     for (const section of ['integrations', 'conflicts']) {
@@ -410,7 +410,6 @@ export function zipEntries(bytes) {
 function versionEntry(value, repository, manifest) {
     stableVersion(value.version);
     constraints(value.requirements, true);
-    validateSupportedGames(value.supported_games, manifest.type);
     const url = `https://github.com/${repository}/releases/download/v${value.version}/${manifest.id}-${value.version}.zip`;
     if (
         !value.requirements ||
@@ -424,7 +423,7 @@ function versionEntry(value, repository, manifest) {
     return {
         version: value.version,
         requirements: value.requirements,
-        ...(value.supported_games !== undefined ? { supported_games: value.supported_games } : {}),
+        ...gameCompatibility(value, manifest.type),
         download: value.download,
     };
 }
@@ -583,7 +582,7 @@ export async function buildBundle({
     const current = {
         version: plan.version,
         requirements: manifest.requires,
-        ...(manifest.supported_games !== undefined ? { supported_games: manifest.supported_games } : {}),
+        ...gameCompatibility(manifest, manifest.type),
         download: {
             url: `https://github.com/${repository}/releases/download/${plan.tag}/${filename}`,
             sha256: digest(archive),

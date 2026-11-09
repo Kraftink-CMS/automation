@@ -320,6 +320,8 @@ test('market presentation comes from committed package translations and commerci
             ...manifest,
             description: 'sample::messages.description',
             supported_games: ['minecraft', 'hytale'],
+            excluded_games: [],
+            game_enhancements: ['minecraft'],
             market: {
                 name: 'sample::messages.name',
                 image: { fr: 'preview-fr.png', en: 'resources/market/preview-en.png' },
@@ -363,6 +365,8 @@ test('market presentation comes from committed package translations and commerci
     assert.equal(metadata.resource.author.name, 'Community');
     assert.deepEqual(metadata.resource.support, { discord: 'https://discord.gg/help', email: 'help@example.test' });
     assert.deepEqual(metadata.versions[0].supported_games, ['minecraft', 'hytale']);
+    assert.deepEqual(metadata.versions[0].game_enhancements, ['minecraft']);
+    assert.equal(metadata.versions[0].excluded_games, undefined);
     assert.equal(metadata.resource.manual_only, true);
     assert.equal(metadata.resource.commercial.url, 'https://example.test/acquire');
     assert.deepEqual(metadata.resource.commercial.price, {

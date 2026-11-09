@@ -125,6 +125,13 @@ test('rehashed build metadata cannot change requirements, URLs or trusted histor
         ],
         [
             (value) => {
+                value.versions[0].excluded_games = ['minecraft'];
+                value.versions[0].game_enhancements = ['hytale'];
+            },
+            /trusted release history/,
+        ],
+        [
+            (value) => {
                 value.resource.support = { discord: 'https://discord.gg/other' };
             },
             /committed source identity/,

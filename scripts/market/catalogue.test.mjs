@@ -146,18 +146,27 @@ test('the Market preserves support contacts and per-version compatibility across
     };
     const release = metadata(resource, '2.0.0', ['1.0.0']);
     release.versions[0].supported_games = ['hytale', 'minecraft'];
+    release.versions[0].excluded_games = [];
+    release.versions[0].game_enhancements = ['minecraft'];
+    release.versions[1].excluded_games = ['redm'];
     const registry = source(resource);
     const result = await generateCatalogue({ source: registry, fetchMetadata: async () => release });
     assert.deepEqual(result.failures, []);
     const [listing] = result.catalogue.resources;
     assert.deepEqual(listing.support, resource.support);
     assert.deepEqual(listing.versions[0].supported_games, ['hytale', 'minecraft']);
+    assert.deepEqual(listing.versions[0].game_enhancements, ['minecraft']);
+    assert.equal(listing.versions[0].excluded_games, undefined);
     assert.equal(listing.versions[1].supported_games, undefined);
+    assert.deepEqual(listing.versions[1].excluded_games, ['redm']);
 
     for (const change of [
         (bad) => { bad.resource.support = { discord: 'https://discord.gg.example.test/community' }; },
         (bad) => { bad.resource.support = { email: 'help@example.test?cc=leak@example.test' }; },
-        (bad) => { bad.versions[0].supported_games = []; },
+        (bad) => { bad.versions[0].excluded_games = ['redm']; },
+        (bad) => { bad.versions[0].game_enhancements = ['redm']; },
+        (bad) => { bad.versions[1].game_enhancements = ['redm']; },
+        (bad) => { bad.versions[1].excluded_games = Array.from({ length: 51 }, (_, i) => `game-${i}`); },
         (bad) => { bad.versions[0].supported_games = ['minecraft', 'minecraft']; },
         (bad) => { bad.versions[0].supported_games = ['minecraft\n']; },
     ]) {

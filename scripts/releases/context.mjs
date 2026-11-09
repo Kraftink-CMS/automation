@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { gameCompatibility } from '../market/catalogue.mjs';
 import { localBundle } from './publish.mjs';
 
 export async function collectCustomAssets(directory) {
@@ -92,7 +93,7 @@ export async function verifyBuiltAssets({ plan, manifest, history, repository, d
     const current = {
         version: plan.version,
         requirements: manifest.requires,
-        ...(manifest.supported_games !== undefined ? { supported_games: manifest.supported_games } : {}),
+        ...gameCompatibility(manifest, manifest.type),
         download,
     };
     const versions = [current, ...history.filter((entry) => entry.version !== plan.version)].slice(0, 100);

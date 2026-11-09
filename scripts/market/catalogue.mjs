@@ -71,17 +71,34 @@ export function validatePresentation(value, localImages = false) {
     }
 }
 
-export function validateSupportedGames(value, type) {
-    if (
-        value !== undefined &&
-        (type !== 'plugin' ||
-            !Array.isArray(value) ||
-            value.length === 0 ||
-            new Set(value).size !== value.length ||
-            value.some((id) => typeof id !== 'string' || id !== id.trim() || !slugPattern.test(id)))
-    ) {
-        throw new Error('supported_games must be a nonempty list of unique game IDs on a plugin.');
+export function gameCompatibility(value, type) {
+    const fields = {};
+    for (const key of ['supported_games', 'excluded_games', 'game_enhancements']) {
+        const list = value[key];
+        if (list === undefined) {
+            continue;
+        }
+        if (
+            type !== 'plugin' ||
+            !Array.isArray(list) ||
+            list.length > 50 ||
+            new Set(list).size !== list.length ||
+            [...list].some((id) => typeof id !== 'string' || id !== id.trim() || !slugPattern.test(id))
+        ) {
+            throw new Error(`${key} requires a list of up to 50 unique game IDs on a plugin.`);
+        }
+        if (list.length > 0) {
+            fields[key] = list;
+        }
     }
+    const { supported_games: supported = [], excluded_games: excluded = [], game_enhancements: enhancements = [] } = fields;
+    if (supported.length && excluded.length) {
+        throw new Error('Only one of supported_games and excluded_games may contain game IDs.');
+    }
+    if (enhancements.some((id) => (supported.length && !supported.includes(id)) || excluded.includes(id))) {
+        throw new Error('game_enhancements may only reference compatible games.');
+    }
+    return fields;
 }
 
 export function validateMarketSupport(value) {
@@ -267,11 +284,10 @@ function versionEntry(value, resource, strictArchive = false) {
         }
         constraint(requirement);
     }
-    validateSupportedGames(value.supported_games, resource.type);
     const entry = {
         version,
         requirements,
-        ...(value.supported_games !== undefined ? { supported_games: value.supported_games } : {}),
+        ...gameCompatibility(value, resource.type),
     };
     if (resource.manual_only && value.download === undefined) {
         return entry;
