@@ -57,7 +57,7 @@ An existing workflow can also call `Kraftink-CMS/automation@master` directly.
 
 ## Development
 
-Local development requires Node.js 24, PHP 8.5, Composer 2, and Git.
+Local development requires Git and the versions of Node.js, PHP, and Composer listed in the [tooling workflow](.github/workflows/ci.yml).
 
 ```shell
 npm ci --ignore-scripts
