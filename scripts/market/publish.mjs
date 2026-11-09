@@ -837,7 +837,7 @@ async function main() {
         client: createMarketClient({ token: app.token }),
         appId: app.appId,
         appSlug: app.appSlug,
-        fetchChangelogs: fetchReleaseChangelogs,
+        fetchChangelogs: (resource, versions) => fetchReleaseChangelogs(resource, versions, { token: app.token }),
     });
     if (!options.check && ['configured', 'unchanged'].includes(result.action)) {
         result.site_cache = await refreshSiteCache({ commit: result.merge_sha, secret: process.env.KRAFTINK_SITE_CACHE_SECRET });

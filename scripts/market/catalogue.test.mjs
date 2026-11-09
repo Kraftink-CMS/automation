@@ -180,7 +180,7 @@ test('Market collects stable release bodies in a bounded repository listing', as
     const resource = offer();
     const versions = ['2.0.0', '1.1.0', '1.0.0'].map((version) => ({ version }));
     const calls = [];
-    const changelogs = await fetchReleaseChangelogs(resource, versions, async (url, options) => {
+    const changelogs = await fetchReleaseChangelogs(resource, versions, { token: 'test-app-token', transport: async (url, options) => {
         calls.push(url.href);
         assert.equal(options.redirect, 'error');
         assert.equal(options.headers.Authorization, undefined);
@@ -192,12 +192,26 @@ test('Market collects stable release bodies in a bounded repository listing', as
             release('v1.0.0', '📦'.repeat(4096)),
             release('v0.1.0', 'Not in the validated package history'),
         ]);
-    });
+    } });
     assert.deepEqual(calls, ['https://api.github.com/repos/community/plugin-sample/releases?per_page=100&page=1']);
     assert.equal(changelogs.get('2.0.0'), '## Improvements\n\n- A change');
     assert.equal(changelogs.has('1.1.0'), false);
     assert.match(changelogs.get('1.0.0'), /📦\n\n…$/u);
     assert.ok(Buffer.byteLength(changelogs.get('1.0.0')) <= 8192);
+});
+
+test('Market release listings use the App token only for first-party GitHub API reads', async () => {
+    const resource = { repository: 'https://github.com/Kraftink-CMS/Plugin-Sample' };
+    await fetchReleaseChangelogs(resource, [{ version: '1.0.0' }], {
+        token: 'test-app-token',
+        async transport(url, options) {
+            assert.equal(url.origin, 'https://api.github.com');
+            assert.equal(url.pathname, '/repos/Kraftink-CMS/Plugin-Sample/releases');
+            assert.equal(options.headers.Authorization, 'Bearer test-app-token');
+            assert.equal(options.redirect, 'error');
+            return Response.json([]);
+        },
+    });
 });
 
 test('Market keeps earlier changelogs, refreshes new versions and survives a release API outage', async () => {

@@ -673,18 +673,20 @@ function releaseChangelog(value) {
     return bytes.subarray(0, end).toString('utf8').trimEnd() + suffix;
 }
 
-export async function fetchReleaseChangelogs(resource, versions, transport = fetch) {
+export async function fetchReleaseChangelogs(resource, versions, { token, transport = fetch } = {}) {
     const repository = repositoryName(resource.repository);
     const tags = new Map(versions.map(({ version }) => [`v${version}`, version]));
     const notes = new Map();
+    const headers = {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'KraftInk-Market',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(token && /^kraftink-cms\//i.test(repository) ? { Authorization: `Bearer ${token}` } : {}),
+    };
     const signal = AbortSignal.timeout(15000);
     for (let page = 1; page <= 10 && tags.size > 0; page += 1) {
         const response = await transport(new URL(`https://api.github.com/repos/${repository}/releases?per_page=100&page=${page}`), {
-            headers: {
-                Accept: 'application/vnd.github+json',
-                'User-Agent': 'KraftInk-Market',
-                'X-GitHub-Api-Version': '2022-11-28',
-            },
+            headers,
             redirect: 'error',
             signal,
         });
