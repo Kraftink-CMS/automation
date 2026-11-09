@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { git, stableVersion } from './version.mjs';
 import { buildComposer } from './composer.mjs';
-import { validatePresentation } from '../market/catalogue.mjs';
+import { validateMarketSupport, validatePresentation, validateSupportedGames } from '../market/catalogue.mjs';
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const allowedRoot =
@@ -285,6 +285,8 @@ export function manifestFor(raw) {
         description: market.description ?? manifest.description,
         ...(Object.hasOwn(market, 'image') ? { image: market.image } : {}),
     }, true);
+    validateSupportedGames(manifest.supported_games, manifest.type);
+    validateMarketSupport(market.support);
     constraints(manifest.requires, true);
     for (const section of ['integrations', 'conflicts']) {
         if (Object.hasOwn(manifest, section)) {
@@ -327,7 +329,9 @@ export async function marketResource(files, repository) {
             stdio: ['ignore', 'pipe', 'pipe'],
         });
 
-        return JSON.parse(output);
+        const resource = JSON.parse(output);
+        validateMarketSupport(resource.support);
+        return resource;
     } finally {
         await rm(stage, { recursive: true, force: true });
     }
@@ -403,10 +407,11 @@ export function zipEntries(bytes) {
     return files;
 }
 
-function versionEntry(value, repository, slug) {
+function versionEntry(value, repository, manifest) {
     stableVersion(value.version);
     constraints(value.requirements, true);
-    const url = `https://github.com/${repository}/releases/download/v${value.version}/${slug}-${value.version}.zip`;
+    validateSupportedGames(value.supported_games, manifest.type);
+    const url = `https://github.com/${repository}/releases/download/v${value.version}/${manifest.id}-${value.version}.zip`;
     if (
         !value.requirements ||
         typeof value.requirements.cms !== 'string' ||
@@ -419,6 +424,7 @@ function versionEntry(value, repository, slug) {
     return {
         version: value.version,
         requirements: value.requirements,
+        ...(value.supported_games !== undefined ? { supported_games: value.supported_games } : {}),
         download: value.download,
     };
 }
@@ -448,7 +454,7 @@ export async function previousVersions({ plan, repository, manifest, client }) {
     if (!Array.isArray(versions) || versions.length > 100 || !versions.length) {
         throw new Error('Invalid previous version history.');
     }
-    return versions.map((entry) => versionEntry(entry, repository, manifest.id));
+    return versions.map((entry) => versionEntry(entry, repository, manifest));
 }
 
 function packageFiles(root, sha, manifest) {
@@ -577,6 +583,7 @@ export async function buildBundle({
     const current = {
         version: plan.version,
         requirements: manifest.requires,
+        ...(manifest.supported_games !== undefined ? { supported_games: manifest.supported_games } : {}),
         download: {
             url: `https://github.com/${repository}/releases/download/${plan.tag}/${filename}`,
             sha256: digest(archive),
@@ -585,7 +592,7 @@ export async function buildBundle({
     const versions = [current, ...history.filter((entry) => entry.version !== plan.version)].slice(0, 100);
     const versionNames = new Set();
     versions.forEach((entry) => {
-        versionEntry(entry, repository, manifest.id);
+        versionEntry(entry, repository, manifest);
         if (versionNames.has(entry.version)) {
             throw new Error('Duplicate package versions in release history.');
         }
@@ -597,7 +604,9 @@ export async function buildBundle({
         resource,
         slug: manifest.id,
         type: manifest.type,
-        ...current,
+        version: current.version,
+        requirements: current.requirements,
+        download: current.download,
         versions,
     };
     let metadataBytes = Buffer.from(JSON.stringify(metadata, null, 4) + '\n');

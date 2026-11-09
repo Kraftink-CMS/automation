@@ -148,7 +148,8 @@ try {
     if (!$directory || !preg_match('/^[a-z][a-z0-9-]{1,49}$/D', $owner)) {
         throw new RuntimeException('The package directory or repository owner is invalid.');
     }
-    $manifest = json_decode(file_get_contents($directory.'/manifest.json'), true, 32, JSON_THROW_ON_ERROR);
+    $manifestJson = file_get_contents($directory.'/manifest.json');
+    $manifest = json_decode($manifestJson, true, 32, JSON_THROW_ON_ERROR);
     $slug = $manifest['id'] ?? null;
     if (
         !is_string($slug) ||
@@ -234,6 +235,9 @@ try {
             $settings['image'],
             static fn (mixed $image): string => marketImage($image, $directory, $argv[2], $manifest['version'] ?? null),
         );
+    }
+    if (array_key_exists('support', $settings)) {
+        $resource['support'] = json_decode($manifestJson, false, 32, JSON_THROW_ON_ERROR)->market->support;
     }
     echo json_encode($resource, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES).PHP_EOL;
 } catch (Throwable $error) {

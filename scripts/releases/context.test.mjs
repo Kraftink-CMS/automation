@@ -117,6 +117,18 @@ test('rehashed build metadata cannot change requirements, URLs or trusted histor
             },
             /trusted release history/,
         ],
+        [
+            (value) => {
+                value.versions[0].supported_games = ['minecraft'];
+            },
+            /trusted release history/,
+        ],
+        [
+            (value) => {
+                value.resource.support = { discord: 'https://discord.gg/other' };
+            },
+            /committed source identity/,
+        ],
     ]) {
         await buildBundle({
             root: source.root,

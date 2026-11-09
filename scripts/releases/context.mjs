@@ -84,13 +84,15 @@ export async function verifyBuiltAssets({ plan, manifest, history, repository, d
         metadata.resource?.slug !== manifest.id ||
         metadata.resource?.type !== manifest.type ||
         metadata.resource?.repository !== `https://github.com/${repository}` ||
-        metadata.resource?.author?.id !== owner
+        metadata.resource?.author?.id !== owner ||
+        !isDeepStrictEqual(metadata.resource?.support, manifest.market?.support)
     ) {
         throw new Error('Built metadata does not match the committed source identity and archive.');
     }
     const current = {
         version: plan.version,
         requirements: manifest.requires,
+        ...(manifest.supported_games !== undefined ? { supported_games: manifest.supported_games } : {}),
         download,
     };
     const versions = [current, ...history.filter((entry) => entry.version !== plan.version)].slice(0, 100);

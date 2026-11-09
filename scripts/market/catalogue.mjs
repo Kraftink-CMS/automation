@@ -71,6 +71,42 @@ export function validatePresentation(value, localImages = false) {
     }
 }
 
+export function validateSupportedGames(value, type) {
+    if (
+        value !== undefined &&
+        (type !== 'plugin' ||
+            !Array.isArray(value) ||
+            value.length === 0 ||
+            new Set(value).size !== value.length ||
+            value.some((id) => typeof id !== 'string' || id !== id.trim() || !slugPattern.test(id)))
+    ) {
+        throw new Error('supported_games must be a nonempty list of unique game IDs on a plugin.');
+    }
+}
+
+export function validateMarketSupport(value) {
+    if (value === undefined) {
+        return;
+    }
+    const discord = /^https:\/\/(?:discord\.gg\/[A-Za-z0-9_-]{1,100}|discord\.com\/invite\/[A-Za-z0-9_-]{1,100}|discord\.kraftink\.com)\/?$/;
+    const email = /^[A-Za-z0-9_+-]+(?:\.[A-Za-z0-9_+-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+    if (
+        !value ||
+        typeof value !== 'object' ||
+        Array.isArray(value) ||
+        Object.entries(value).some(([channel, contact]) => {
+            if (typeof contact !== 'string' || contact !== contact.trim()) {
+                return true;
+            }
+            return channel === 'discord'
+                ? !discord.test(contact)
+                : channel !== 'email' || contact.length > 254 || !email.test(contact);
+        })
+    ) {
+        throw new Error('Market support requires a Discord invite URL or a simple email address.');
+    }
+}
+
 function resourceOffer(value, registeredRepository = null) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Invalid resource offer.');
@@ -90,6 +126,7 @@ function resourceOffer(value, registeredRepository = null) {
         throw new Error('Invalid resource identity or commercial offer.');
     }
     validatePresentation(value);
+    validateMarketSupport(value.support);
     if (value.author.url !== undefined) publicUrl(value.author.url);
     if (value.commercial.url !== undefined) publicUrl(value.commercial.url);
     const repository = value.repository === undefined ? null : repositoryName(value.repository);
@@ -127,6 +164,7 @@ function resourceOffer(value, registeredRepository = null) {
         description: value.description,
         ...(value.image !== undefined ? { image: value.image } : {}),
         author: value.author,
+        ...(value.support !== undefined ? { support: value.support } : {}),
         ...(repository ? { repository: `https://github.com/${repository}` } : {}),
         commercial: value.commercial,
         manual_only: manual,
@@ -229,8 +267,14 @@ function versionEntry(value, resource, strictArchive = false) {
         }
         constraint(requirement);
     }
+    validateSupportedGames(value.supported_games, resource.type);
+    const entry = {
+        version,
+        requirements,
+        ...(value.supported_games !== undefined ? { supported_games: value.supported_games } : {}),
+    };
     if (resource.manual_only && value.download === undefined) {
-        return { version, requirements };
+        return entry;
     }
     publicUrl(value.download?.url);
     if (!/^[a-f0-9]{64}$/i.test(value.download?.sha256)) {
@@ -255,8 +299,7 @@ function versionEntry(value, resource, strictArchive = false) {
             throw new Error('Automatic downloads require a supported GitHub archive.');
         }
         return {
-            version,
-            requirements,
+            ...entry,
             download: { url: value.download.url, sha256: value.download.sha256.toLowerCase() },
         };
     }
@@ -277,8 +320,7 @@ function versionEntry(value, resource, strictArchive = false) {
         throw new Error('Release archive identity or checksum mismatch.');
     }
     return {
-        version,
-        requirements,
+        ...entry,
         download: { url: value.download.url, sha256: value.download.sha256.toLowerCase() },
     };
 }

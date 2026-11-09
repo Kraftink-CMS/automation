@@ -139,6 +139,40 @@ test('one central reconciliation resolves registered repositories with bounded c
     assert.equal(result.failures.length, 0);
 });
 
+test('the Market preserves support contacts and per-version compatibility across refreshes', async () => {
+    const resource = {
+        ...offer(),
+        support: { discord: 'https://discord.com/invite/community', email: 'help+market@example.test' },
+    };
+    const release = metadata(resource, '2.0.0', ['1.0.0']);
+    release.versions[0].supported_games = ['hytale', 'minecraft'];
+    const registry = source(resource);
+    const result = await generateCatalogue({ source: registry, fetchMetadata: async () => release });
+    assert.deepEqual(result.failures, []);
+    const [listing] = result.catalogue.resources;
+    assert.deepEqual(listing.support, resource.support);
+    assert.deepEqual(listing.versions[0].supported_games, ['hytale', 'minecraft']);
+    assert.equal(listing.versions[1].supported_games, undefined);
+
+    for (const change of [
+        (bad) => { bad.resource.support = { discord: 'https://discord.gg.example.test/community' }; },
+        (bad) => { bad.resource.support = { email: 'help@example.test?cc=leak@example.test' }; },
+        (bad) => { bad.versions[0].supported_games = []; },
+        (bad) => { bad.versions[0].supported_games = ['minecraft', 'minecraft']; },
+        (bad) => { bad.versions[0].supported_games = ['minecraft\n']; },
+    ]) {
+        const invalid = structuredClone(release);
+        change(invalid);
+        const refreshed = await generateCatalogue({
+            source: registry,
+            previous: result.catalogue,
+            fetchMetadata: async () => invalid,
+        });
+        assert.deepEqual(refreshed.catalogue.resources, [listing]);
+        assert.deepEqual(refreshed.failures, [{ repository: 'community/plugin-sample', preserved: true }]);
+    }
+});
+
 test('full reconciliation preserves frozen offers exactly and never creates an unpublished frozen offer', async () => {
     const frozen = offer('frozen');
     const active = offer('active');

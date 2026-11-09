@@ -319,10 +319,12 @@ test('market presentation comes from committed package translations and commerci
         JSON.stringify({
             ...manifest,
             description: 'sample::messages.description',
+            supported_games: ['minecraft', 'hytale'],
             market: {
                 name: 'sample::messages.name',
                 image: { fr: 'preview-fr.png', en: 'resources/market/preview-en.png' },
                 author: { name: 'Community' },
+                support: { discord: 'https://discord.gg/help', email: 'help@example.test' },
                 commercial: {
                     kind: 'paid',
                     url: 'https://example.test/acquire',
@@ -359,6 +361,8 @@ test('market presentation comes from committed package translations and commerci
         fr: `https://raw.githubusercontent.com/${repository}/${plan.tag}/resources/market/preview-fr.png`,
     });
     assert.equal(metadata.resource.author.name, 'Community');
+    assert.deepEqual(metadata.resource.support, { discord: 'https://discord.gg/help', email: 'help@example.test' });
+    assert.deepEqual(metadata.versions[0].supported_games, ['minecraft', 'hytale']);
     assert.equal(metadata.resource.manual_only, true);
     assert.equal(metadata.resource.commercial.url, 'https://example.test/acquire');
     assert.deepEqual(metadata.resource.commercial.price, {
