@@ -459,6 +459,78 @@ test('market metadata exports explicit language dictionaries and image variants 
     assert.equal((await marketResource(files, 'example/Plugin-Sample')).image, market.image);
 });
 
+test('market release packages include the default Markdown and publish pinned preview links', async (context) => {
+    const { root, repository, git } = await fixture(context);
+    const folder = resolve(root, 'resources/market');
+    await mkdir(folder, { recursive: true });
+    const source = '# Sample\n\n![Preview](resources/market/preview.png)\n';
+    await writeFile(resolve(root, 'MARKET.md'), source);
+    await writeFile(resolve(folder, 'preview.png'), 'image');
+    await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ ...manifest, market: { icon: 'puzzle' } }));
+    git('add', '.');
+    git('commit', '-m', 'Add Market presentation');
+    const plan = await planVersion({ root });
+    const directory = await mkdtemp(resolve(tmpdir(), 'kraftink-assets-'));
+    context.after(() => rm(directory, { recursive: true, force: true }));
+    const { metadata } = await buildBundle({ root, repository, plan, directory });
+    const files = zipEntries(await readFile(resolve(directory, 'sample-1.0.0.zip')));
+    assert.equal(files.get('MARKET.md').toString(), source);
+    assert.equal(files.get('resources/market/preview.png').toString(), 'image');
+    assert.equal(metadata.resource.description, manifest.description);
+    assert.equal(metadata.resource.icon, 'puzzle');
+    assert.equal(
+        metadata.resource.readme,
+        '# Sample\n\n![Preview](<https://raw.githubusercontent.com/example/Plugin-Sample/v1.0.0/resources/market/preview.png>)\n',
+    );
+});
+
+test('market Markdown localizations preserve prose and resolve reference images with an asset icon', async () => {
+    const market = { readme: { fr: 'lang/fr/market.md', en: 'resources/market/en/description.md' }, icon: 'preview.webp' };
+    const files = [
+        ['manifest.json', Buffer.from(JSON.stringify({ ...manifest, version: '1.2.3', market }))],
+        ['MARKET.md', Buffer.from('Unused default')],
+        ['lang/fr/market.md', Buffer.from('![Exemple][preview]\n\n[preview]: preview.webp "Aperçu"\n')],
+        ['resources/market/en/description.md', Buffer.from('Code: `![Literal](other.webp)`\r\n')],
+        ['resources/market/preview.webp', Buffer.from('image')],
+    ];
+    const { icon, readme } = await marketResource(files, 'example/Plugin-Sample');
+    assert.equal(icon, 'https://raw.githubusercontent.com/example/Plugin-Sample/v1.2.3/resources/market/preview.webp');
+    assert.equal(readme.en, 'Code: `![Literal](other.webp)`\n');
+    assert.match(readme.fr, /!\[Exemple\]\(<https:\/\/raw\.githubusercontent\.com\/example\/Plugin-Sample\/v1\.2\.3\/resources\/market\/preview\.webp> "Aperçu"\)/);
+});
+
+test('market Markdown and icons reject unapproved files and unsafe image destinations', async () => {
+    const files = (readme, market = {}) => [
+        ['manifest.json', Buffer.from(JSON.stringify({ ...manifest, version: '1.2.3', market }))],
+        ['MARKET.md', Buffer.from(readme)],
+    ];
+    for (const readme of [
+        '![Preview](../private.png)',
+        '![Preview](%2e%2e/private.png)',
+        '![Preview](//example.test/private.png)',
+        '![Preview](javascript:alert%281%29)',
+        '![Preview](data:image/png;base64,aaaa)',
+        '![Preview](https://example.test/preview.png?tracking=yes)',
+        '![Preview](missing.png)',
+        '<img src="https://example.test/preview.png" onerror="alert(1)">',
+        'é'.repeat(16385),
+        'Control\u0000character',
+        Buffer.from([0xc3, 0x28]),
+    ]) {
+        await assert.rejects(marketResource(files(readme), 'example/Plugin-Sample'));
+    }
+    for (const market of [
+        { icon: 'unknown-bootstrap-glyph' },
+        { icon: 'preview.svg' },
+        { icon: { en: 'puzzle' } },
+        { readme: 'README.md' },
+        { readme: 'resources/market/../secret.md' },
+        { readme: 'MARKET.fr.md' },
+    ]) {
+        await assert.rejects(marketResource(files('# Sample', market), 'example/Plugin-Sample'));
+    }
+});
+
 test('market metadata refuses malformed dictionaries and unsafe image URLs', async () => {
     const invalid = [
         { name: {} },

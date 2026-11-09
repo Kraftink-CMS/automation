@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     encodeCatalogue,
+    fetchReleaseChangelogs,
     fetchReleaseMetadata,
     generateCatalogue,
     metadataVersions,
@@ -138,6 +139,108 @@ test('one central reconciliation resolves registered repositories with bounded c
     );
     assert.equal(result.catalogue.resources[0].release_source, undefined);
     assert.equal(result.failures.length, 0);
+});
+
+test('Market refresh carries bounded Markdown and icons from the release metadata', async () => {
+    const resource = {
+        ...offer(),
+        icon: 'puzzle',
+        readme: {
+            en: '# Sample\n\n![Preview](<https://raw.githubusercontent.com/community/Plugin-Sample/v1.0.0/resources/market/preview.png>)',
+            fr: '# Exemple',
+        },
+    };
+    const registry = source(resource);
+    const release = metadata(resource);
+    const result = await generateCatalogue({ source: registry, fetchMetadata: async () => release });
+    assert.deepEqual(result.failures, []);
+    const [listing] = result.catalogue.resources;
+    assert.deepEqual(listing.readme, resource.readme);
+    assert.deepEqual(listing.description, resource.description);
+    assert.equal(listing.icon, resource.icon);
+    for (const invalid of [
+        { readme: 'é'.repeat(16385) },
+        { readme: { en: 'a'.repeat(32768), fr: 'b'.repeat(32768), de: 'c'.repeat(32768), es: 'd'.repeat(32768), it: 'e' } },
+        { readme: Object.fromEntries(['en', 'fr', 'de', 'es', 'it', 'pt', 'nl', 'ro', 'sv'].map((locale) => [locale, 'Readme'])) },
+        { readme: 'Broken\u0000text' },
+        { icon: 'resources/market/preview.png' },
+        { icon: 'https://images.example/preview.png?token=value' },
+    ]) {
+        const bad = { ...release, resource: { ...resource, ...invalid } };
+        const refresh = await generateCatalogue({ source: registry, previous: result.catalogue, fetchMetadata: async () => bad });
+        assert.deepEqual(refresh.catalogue, result.catalogue);
+        assert.deepEqual(refresh.failures, [{ repository: 'community/plugin-sample', preserved: true }]);
+    }
+});
+
+test('Market collects stable release bodies in a bounded repository listing', async () => {
+    const release = (tag_name, body, options = {}) => ({
+        tag_name, body, draft: false, prerelease: false, published_at: '2026-11-09T13:00:00Z', ...options,
+    });
+    const resource = offer();
+    const versions = ['2.0.0', '1.1.0', '1.0.0'].map((version) => ({ version }));
+    const calls = [];
+    const changelogs = await fetchReleaseChangelogs(resource, versions, async (url, options) => {
+        calls.push(url.href);
+        assert.equal(options.redirect, 'error');
+        assert.equal(options.headers.Authorization, undefined);
+        return Response.json([
+            release('v2.0.0', '## Improvements\r\n\r\n- A change'),
+            release('v1.1.0', 'Unpublished', { draft: true }),
+            release('v1.1.0', 'Preview', { prerelease: true }),
+            release('v1.1.0', 'No date', { published_at: null }),
+            release('v1.0.0', '📦'.repeat(4096)),
+            release('v0.1.0', 'Not in the validated package history'),
+        ]);
+    });
+    assert.deepEqual(calls, ['https://api.github.com/repos/community/plugin-sample/releases?per_page=100&page=1']);
+    assert.equal(changelogs.get('2.0.0'), '## Improvements\n\n- A change');
+    assert.equal(changelogs.has('1.1.0'), false);
+    assert.match(changelogs.get('1.0.0'), /📦\n\n…$/u);
+    assert.ok(Buffer.byteLength(changelogs.get('1.0.0')) <= 8192);
+});
+
+test('Market keeps earlier changelogs, refreshes new versions and survives a release API outage', async () => {
+    const resource = offer();
+    const registry = source(resource);
+    let calls = 0;
+    const release = metadata(resource, '2.0.0', ['1.0.0']);
+    release.versions[0].changelog = 'Untrusted release asset field';
+    const fetchChangelogs = async (registration, versions) => {
+        calls += 1;
+        assert.equal(registration.repository, resource.repository);
+        assert.deepEqual(versions.map(({ version }) => version), ['2.0.0', '1.0.0']);
+        return new Map([['2.0.0', '## Features'], ['1.0.0', 'First release']]);
+    };
+    const first = await generateCatalogue({ source: registry, fetchMetadata: async () => release, fetchChangelogs });
+    assert.deepEqual(first.catalogue.resources[0].versions.map(({ changelog }) => changelog), ['## Features', 'First release']);
+    const cached = await generateCatalogue({
+        source: registry, previous: first.catalogue, fetchMetadata: async () => release, fetchChangelogs,
+    });
+    assert.equal(calls, 1);
+    assert.deepEqual(cached.catalogue, first.catalogue);
+    const retry = await generateCatalogue({
+        source: registry,
+        previous: first.catalogue,
+        fetchMetadata: async () => metadata(resource, '2.0.1', ['2.0.0', '1.0.0']),
+        fetchChangelogs: async () => { throw new Error('rate limit'); },
+    });
+    assert.equal(retry.changelogFailures, 1);
+    assert.deepEqual(retry.failures, []);
+    assert.deepEqual(retry.catalogue.resources[0].versions.map(({ changelog }) => changelog), [
+        undefined, '## Features', 'First release',
+    ]);
+});
+
+test('catalogue capacity keeps version entries ahead of older changelogs', () => {
+    const resource = offer();
+    const release = metadata(resource, '2.0.0', ['1.0.0']);
+    const versions = release.versions.map((entry) => ({ ...entry, changelog: 'A'.repeat(200) }));
+    const catalogue = { schema_version: 1, resources: [{ ...resource, versions }] };
+    const expected = structuredClone(catalogue);
+    delete expected.resources[0].versions[1].changelog;
+    const limit = Buffer.byteLength(JSON.stringify(expected, null, 4) + '\n');
+    assert.deepEqual(encodeCatalogue(catalogue, limit).catalogue, expected);
 });
 
 test('the Market preserves support contacts and per-version compatibility across refreshes', async () => {

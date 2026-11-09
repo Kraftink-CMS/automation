@@ -8,12 +8,22 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { git, stableVersion } from './version.mjs';
 import { buildComposer } from './composer.mjs';
-import { gameCompatibility, validateMarketSupport, validatePresentation } from '../market/catalogue.mjs';
+import {
+    gameCompatibility,
+    isMarketReadmePath,
+    validateMarketSupport,
+    validatePresentation,
+} from '../market/catalogue.mjs';
+import { packageMarketContent } from './market-content.mjs';
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const allowedRoot =
     /^(?:manifest\.json|composer\.(?:json|lock)|(?:LICENSE|NOTICE|README)(?:[.-][A-Za-z0-9_.-]+)?|_[A-Za-z0-9_.-]+\.scss)$/;
 const allowedDirectory = /^(?:(?:database|lang|public|resources|routes|src|views)\/|config\/.+\.php$)/;
+
+function packagedPath(path) {
+    return allowedRoot.test(path) || allowedDirectory.test(path) || isMarketReadmePath(path);
+}
 
 export function assertPackageLimits({ files, extracted, archive = 0 }) {
     if (files > 10000 || extracted > 104857600 || archive > 52428800) {
@@ -284,6 +294,8 @@ export function manifestFor(raw) {
         name: market.name ?? manifest.name,
         description: market.description ?? manifest.description,
         ...(Object.hasOwn(market, 'image') ? { image: market.image } : {}),
+        ...(Object.hasOwn(market, 'icon') ? { icon: market.icon } : {}),
+        ...(Object.hasOwn(market, 'readme') ? { readme: market.readme } : {}),
     }, true);
     gameCompatibility(manifest, manifest.type);
     validateMarketSupport(market.support);
@@ -331,7 +343,8 @@ export async function marketResource(files, repository) {
 
         const resource = JSON.parse(output);
         validateMarketSupport(resource.support);
-        return resource;
+        const content = await packageMarketContent(files, repository);
+        return { ...resource, ...content };
     } finally {
         await rm(stage, { recursive: true, force: true });
     }
@@ -468,7 +481,7 @@ function packageFiles(root, sha, manifest) {
             throw new Error('Submodules and unsupported Git entries cannot be packaged.');
         }
         const [, mode, object, path] = match;
-        const packaged = allowedRoot.test(path) || allowedDirectory.test(path);
+        const packaged = packagedPath(path);
         if (!safePath(path)) {
             if (packaged) {
                 throw new Error('Unsafe file in the extension package.');
@@ -531,7 +544,7 @@ async function workingPackageFiles(root, manifest) {
                     ? Buffer.from(JSON.stringify(manifest, null, 4) + '\n')
                     : await readFile(resolve(root, path));
             sources.push([path, bytes, info.mode & 0o111 ? '100755' : '100644']);
-            if (allowedRoot.test(path) || allowedDirectory.test(path)) {
+            if (packagedPath(path)) {
                 files.push([path, bytes]);
             }
         }

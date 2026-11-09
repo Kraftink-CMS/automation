@@ -2,6 +2,16 @@ const catalogueLimit = 2097152;
 const metadataLimit = 262144;
 const slugPattern = /^[a-z][a-z0-9-]{1,49}$/;
 const repositoryPattern = /^([A-Za-z0-9_-][A-Za-z0-9_.-]*)\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)$/;
+const imagePath = /^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.(?:png|jpe?g|webp|gif|avif)$/i;
+const rootReadmePath = /^MARKET(?:\.[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*)?\.md$/;
+const localizedReadmePath = /^lang\/[a-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})*\/market\.md$/;
+const nestedReadmePath = /^resources\/market\/(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.md$/;
+const readmeTotalLimit = 128 * 1024;
+const readmeLocales = 8;
+const changelogLimit = 8 * 1024;
+const markdownControls = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+export const marketReadmeBytes = 32 * 1024;
+export const marketIconId = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function repositoryName(value) {
     if (typeof value !== 'string') {
@@ -14,7 +24,7 @@ export function repositoryName(value) {
     return name;
 }
 
-function translations(value, maximum) {
+function translations(value, maximum, locales = 100) {
     if (typeof value === 'string') {
         if (!value.trim() || [...value].length > maximum) {
             throw new Error('Invalid catalogue text.');
@@ -26,7 +36,7 @@ function translations(value, maximum) {
         typeof value !== 'object' ||
         Array.isArray(value) ||
         !Object.keys(value).length ||
-        Object.keys(value).length > 100
+        Object.keys(value).length > locales
     ) {
         throw new Error('Catalogue values require text or a nonempty language dictionary.');
     }
@@ -43,6 +53,10 @@ function translations(value, maximum) {
     }
 }
 
+function values(value) {
+    return typeof value === 'string' ? [value] : Object.values(value);
+}
+
 function publicUrl(value) {
     if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/(?:\[[^\]]+\]|[^/:?#]+)(?:\/|$)/i.test(value) || /[\x00-\x20\x7f"'<>`\\?#]/.test(value)) {
         throw new Error('Catalogue links require plain HTTPS URLs.');
@@ -54,21 +68,57 @@ function publicUrl(value) {
     return value;
 }
 
+export function validateMarketImage(value, localImages = false) {
+    if (localImages && typeof value === 'string' && !/^https:/i.test(value)) {
+        if (value.length > 2048 || value !== value.trim() || !imagePath.test(value)) {
+            throw new Error('Market images require a safe path inside resources/market or a plain HTTPS URL.');
+        }
+        return;
+    }
+    publicUrl(value);
+}
+
+export function isMarketReadmePath(value) {
+    return value === value.trim() &&
+        (rootReadmePath.test(value) || localizedReadmePath.test(value) || nestedReadmePath.test(value));
+}
+
+export function validateMarketReadme(value, sourcePaths = false) {
+    translations(value, sourcePaths ? 512 : marketReadmeBytes, readmeLocales);
+    let total = 0;
+    for (const text of values(value)) {
+        if (sourcePaths) {
+            if (!isMarketReadmePath(text)) {
+                throw new Error('Market readmes require MARKET.md, MARKET.<locale>.md, lang/<locale>/market.md, or a Markdown file in resources/market.');
+            }
+            continue;
+        }
+        const bytes = Buffer.byteLength(text);
+        total += bytes;
+        if (bytes > marketReadmeBytes || total > readmeTotalLimit || markdownControls.test(text)) {
+            throw new Error('Market Markdown exceeds its allowed size or contains control characters.');
+        }
+    }
+}
+
+export function validateMarketIcon(value, localImages = false) {
+    if (typeof value === 'string' && value.length <= 80 && value === value.trim() && marketIconId.test(value)) {
+        return;
+    }
+    validateMarketImage(value, localImages);
+}
+
 export function validatePresentation(value, localImages = false) {
     translations(value.name, 120);
     translations(value.description, 1000);
     if (value.image !== undefined) {
         translations(value.image, 2048);
-        for (const image of typeof value.image === 'string' ? [value.image] : Object.values(value.image)) {
-            if (localImages && !/^https:/i.test(image)) {
-                if (!/^(?:[A-Za-z0-9][A-Za-z0-9._-]*\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.(?:png|jpe?g|webp|gif|avif)$/i.test(image)) {
-                    throw new Error('Market images require a safe path inside resources/market or a plain HTTPS URL.');
-                }
-            } else {
-                publicUrl(image);
-            }
+        for (const image of values(value.image)) {
+            validateMarketImage(image, localImages);
         }
     }
+    if (value.icon !== undefined) validateMarketIcon(value.icon, localImages);
+    if (value.readme !== undefined) validateMarketReadme(value.readme, localImages);
 }
 
 export function gameCompatibility(value, type) {
@@ -180,7 +230,9 @@ function resourceOffer(value, registeredRepository = null) {
         type: value.type,
         name: value.name,
         description: value.description,
+        ...(value.readme !== undefined ? { readme: value.readme } : {}),
         ...(value.image !== undefined ? { image: value.image } : {}),
+        ...(value.icon !== undefined ? { icon: value.icon } : {}),
         author: value.author,
         ...(value.support !== undefined ? { support: value.support } : {}),
         ...(repository ? { repository: `https://github.com/${repository}` } : {}),
@@ -290,6 +342,17 @@ function versionEntry(value, resource, strictArchive = false) {
         requirements,
         ...gameCompatibility(value, resource.type),
     };
+    if (!strictArchive && value.changelog !== undefined) {
+        if (
+            typeof value.changelog !== 'string' ||
+            !value.changelog.trim() ||
+            Buffer.byteLength(value.changelog) > changelogLimit ||
+            markdownControls.test(value.changelog)
+        ) {
+            throw new Error('Invalid release changelog.');
+        }
+        entry.changelog = value.changelog;
+    }
     if (resource.manual_only && value.download === undefined) {
         return entry;
     }
@@ -389,8 +452,22 @@ function catalogueResources(catalogue) {
 
 export function encodeCatalogue(catalogue, limit = catalogueLimit, preserved = new Set()) {
     const output = structuredClone(catalogue);
+    const versionIndent = 16;
     let bytes = JSON.stringify(output, null, 4) + '\n';
     let size = Buffer.byteLength(bytes);
+    if (size > limit) {
+        const notes = output.resources
+            .filter((resource) => !preserved.has(resource.id))
+            .flatMap((resource) => resource.versions.map((entry, index) => ({ entry, index })))
+            .filter(({ entry }) => entry.changelog !== undefined)
+            .sort((a, b) => b.index - a.index);
+        for (const { entry } of notes) {
+            if (size <= limit) break;
+            const before = Buffer.byteLength(JSON.stringify(entry, null, 4));
+            delete entry.changelog;
+            size -= before - Buffer.byteLength(JSON.stringify(entry, null, 4)) + versionIndent;
+        }
+    }
     let candidates = output.resources.filter(
         (resource) => resource.versions.length > 1 && !preserved.has(resource.id),
     );
@@ -399,7 +476,7 @@ export function encodeCatalogue(catalogue, limit = catalogueLimit, preserved = n
         for (const resource of candidates) {
             if (size <= limit) break;
             const removed = JSON.stringify(resource.versions.pop(), null, 4);
-            size -= Buffer.byteLength(removed) + 16 * removed.split('\n').length + 2;
+            size -= Buffer.byteLength(removed) + versionIndent * removed.split('\n').length + 2;
             if (resource.versions.length > 1) next.push(resource);
         }
         candidates = next;
@@ -416,6 +493,7 @@ export async function generateCatalogue({
     repository = null,
     force = false,
     fetchMetadata = fetchReleaseMetadata,
+    fetchChangelogs,
 }) {
     if (typeof force !== 'boolean') throw new Error('The force option must be a boolean.');
     const registry = sourceResources(source);
@@ -458,6 +536,7 @@ export async function generateCatalogue({
         }
     }
     const failures = [];
+    let changelogFailures = 0;
     let offset = 0;
     const workers = Array.from({ length: Math.min(6, selected.length) }, async () => {
         while (offset < selected.length) {
@@ -483,6 +562,20 @@ export async function generateCatalogue({
                             throw new Error('A previously published archive checksum changed.');
                     }
                 }
+                const changelogs = new Map(existing?.versions.map(({ version, changelog }) => [version, changelog]));
+                if (fetchChangelogs && (force || !changelogs.get(versions[0].version))) {
+                    try {
+                        for (const [version, changelog] of await fetchChangelogs(registration, versions)) {
+                            changelogs.set(version, changelog);
+                        }
+                    } catch {
+                        changelogFailures += 1;
+                    }
+                }
+                for (const entry of versions) {
+                    const changelog = changelogs.get(entry.version);
+                    if (changelog !== undefined) entry.changelog = changelog;
+                }
                 result.set(key, { ...resource, versions });
             } catch {
                 if (existing) result.set(key, existing);
@@ -504,6 +597,7 @@ export async function generateCatalogue({
     return {
         ...encoded,
         failures: failures.sort((a, b) => a.repository.localeCompare(b.repository, 'en')),
+        ...(changelogFailures ? { changelogFailures } : {}),
         checked: selected.length,
     };
 }
@@ -563,4 +657,59 @@ export async function fetchReleaseMetadata(resource, transport = fetch) {
         return JSON.parse((await responseBytes(response)).toString('utf8'));
     }
     throw new Error('Too many release metadata redirects.');
+}
+
+function releaseChangelog(value) {
+    if (typeof value !== 'string' || !value.trim() || markdownControls.test(value)) {
+        return undefined;
+    }
+    const text = value.replace(/\r\n?/g, '\n').trim();
+    const bytes = Buffer.from(text);
+    if (bytes.length <= changelogLimit) return text;
+
+    const suffix = '\n\n…';
+    let end = changelogLimit - Buffer.byteLength(suffix);
+    while ((bytes[end] & 0xc0) === 0x80) end -= 1;
+    return bytes.subarray(0, end).toString('utf8').trimEnd() + suffix;
+}
+
+export async function fetchReleaseChangelogs(resource, versions, transport = fetch) {
+    const repository = repositoryName(resource.repository);
+    const tags = new Map(versions.map(({ version }) => [`v${version}`, version]));
+    const notes = new Map();
+    const signal = AbortSignal.timeout(15000);
+    for (let page = 1; page <= 10 && tags.size > 0; page += 1) {
+        const response = await transport(new URL(`https://api.github.com/repos/${repository}/releases?per_page=100&page=${page}`), {
+            headers: {
+                Accept: 'application/vnd.github+json',
+                'User-Agent': 'KraftInk-Market',
+                'X-GitHub-Api-Version': '2022-11-28',
+            },
+            redirect: 'error',
+            signal,
+        });
+        if (response.status !== 200) {
+            await response.body?.cancel();
+            throw new Error('Could not read public release changelogs.');
+        }
+        const releases = JSON.parse((await responseBytes(response, 8 * 1024 * 1024)).toString('utf8'));
+        if (!Array.isArray(releases) || releases.length > 100) {
+            throw new Error('Invalid GitHub release inventory.');
+        }
+        for (const release of releases) {
+            const version = tags.get(release?.tag_name);
+            if (
+                version &&
+                release.draft === false &&
+                release.prerelease === false &&
+                typeof release.published_at === 'string' &&
+                Number.isFinite(Date.parse(release.published_at))
+            ) {
+                tags.delete(release.tag_name);
+                notes.set(version, releaseChangelog(release.body));
+            }
+        }
+        if (releases.length < 100) break;
+    }
+    return notes;
 }

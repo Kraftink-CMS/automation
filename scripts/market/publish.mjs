@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAppClient } from '../github/app-auth.mjs';
 import { createGitHubClient } from '../github/protect-repositories.mjs';
-import { generateCatalogue, sourceResources } from './catalogue.mjs';
+import { fetchReleaseChangelogs, generateCatalogue, sourceResources } from './catalogue.mjs';
 import { MarketNotificationError, refreshSiteCache } from './notifications.mjs';
 
 const repository = 'Kraftink-CMS/Market';
@@ -550,6 +550,7 @@ export async function reconcileMarket({
     check = false,
     force = false,
     fetchMetadata,
+    fetchChangelogs,
     wait = pause,
 }) {
     try {
@@ -586,6 +587,7 @@ export async function reconcileMarket({
             repository: target,
             force,
             fetchMetadata,
+            fetchChangelogs,
         });
         if (typeof generated.bytes !== 'string' || Buffer.byteLength(generated.bytes) > limit)
             throw new MarketPublicationError('The generated Market catalogue exceeds its size limit.');
@@ -598,7 +600,12 @@ export async function reconcileMarket({
                 ([path, bytes]) => (path === readme ? currentReadme?.bytes : previous?.bytes) !== bytes,
             ),
         );
-        const result = { repository, checked: generated.checked, failures: generated.failures.length };
+        const result = {
+            repository,
+            checked: generated.checked,
+            failures: generated.failures.length,
+            ...(generated.changelogFailures ? { changelog_failures: generated.changelogFailures } : {}),
+        };
         if (!Object.keys(changes).length) return { ...result, action: 'unchanged', merge_sha: master };
         if (check) return { ...result, action: 'planned', files: Object.keys(changes) };
         const snapshot = { client, repositoryId, dev, master };
@@ -830,6 +837,7 @@ async function main() {
         client: createMarketClient({ token: app.token }),
         appId: app.appId,
         appSlug: app.appSlug,
+        fetchChangelogs: fetchReleaseChangelogs,
     });
     if (!options.check && ['configured', 'unchanged'].includes(result.action)) {
         result.site_cache = await refreshSiteCache({ commit: result.merge_sha, secret: process.env.KRAFTINK_SITE_CACHE_SECRET });
@@ -848,6 +856,11 @@ async function main() {
     if (process.env.GITHUB_STEP_SUMMARY && result.branch_cleanup?.removed === false)
         await appendFile(process.env.GITHUB_STEP_SUMMARY,
             `The catalogue was published. Temporary branch \`${result.branch_cleanup.branch}\` could not be safely removed.\n`);
+    if (process.env.GITHUB_STEP_SUMMARY && result.changelog_failures)
+        await appendFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            `GitHub release notes could not be read for ${result.changelog_failures} resource(s). Existing changelogs were kept.\n`,
+        );
     if (result.action === 'failed' || (options.force || options.repository !== null)
             && (result.action === 'pending' || result.failures > 0)) process.exitCode = 1;
 }
