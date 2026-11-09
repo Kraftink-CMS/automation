@@ -25,6 +25,7 @@ const manifest = {
     name: 'Sample',
     description: 'A community extension.',
     type: 'plugin',
+    games: { supported: ['*'] },
     version: '1.0.0-dev',
     requires: {
         cms: '^1.0',
@@ -215,7 +216,8 @@ async function fixture(context, type = 'plugin') {
     git('config', 'user.email', 'package-tests@example.invalid');
     await mkdir(resolve(root, '.github'), { recursive: true });
     await mkdir(resolve(root, 'src'));
-    await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ ...manifest, type }));
+    const games = type === 'plugin' ? manifest.games : undefined;
+    await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ ...manifest, type, games }));
     await writeFile(resolve(root, 'src/example.php'), '<?php return true;\n');
     await writeFile(
         resolve(root, '.github/release-policy.json'),
@@ -319,9 +321,7 @@ test('market presentation comes from committed package translations and commerci
         JSON.stringify({
             ...manifest,
             description: 'sample::messages.description',
-            supported_games: ['minecraft', 'hytale'],
-            excluded_games: [],
-            game_enhancements: ['minecraft'],
+            games: { supported: ['minecraft', 'hytale'], excluded: [], enhancements: ['minecraft'] },
             market: {
                 name: 'sample::messages.name',
                 image: { fr: 'preview-fr.png', en: 'resources/market/preview-en.png' },
@@ -364,9 +364,7 @@ test('market presentation comes from committed package translations and commerci
     });
     assert.equal(metadata.resource.author.name, 'Community');
     assert.deepEqual(metadata.resource.support, { discord: 'https://discord.gg/help', email: 'help@example.test' });
-    assert.deepEqual(metadata.versions[0].supported_games, ['minecraft', 'hytale']);
-    assert.deepEqual(metadata.versions[0].game_enhancements, ['minecraft']);
-    assert.equal(metadata.versions[0].excluded_games, undefined);
+    assert.deepEqual(metadata.versions[0].games, { supported: ['minecraft', 'hytale'], enhancements: ['minecraft'] });
     assert.equal(metadata.resource.manual_only, true);
     assert.equal(metadata.resource.commercial.url, 'https://example.test/acquire');
     assert.deepEqual(metadata.resource.commercial.price, {
@@ -531,6 +529,7 @@ test('release history is fetched from the previous stable asset and rejects anot
     const version = {
         version: '1.0.0',
         requirements: manifest.requires,
+        games: manifest.games,
         download: {
             url: 'https://github.com/example/Plugin-Sample/releases/download/v1.0.0/sample-1.0.0.zip',
             sha256: 'a'.repeat(64),
@@ -574,6 +573,7 @@ test('SCSS is compiled from committed sources and replaces stale CSS inside the 
     const theme = {
         ...manifest,
         type: 'theme',
+        games: undefined,
         build: { scss: ['_theme.scss'] },
         assets: { styles: ['theme.css'] },
     };
@@ -755,7 +755,7 @@ test('local checks build current sources without Git or changing the package che
 
 test('builtin game protection prevents an independent market release', async (context) => {
     const { root, repository, git } = await fixture(context, 'game');
-    await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ ...manifest, type: 'game', builtin: true }));
+    await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ ...manifest, type: 'game', games: undefined, builtin: true }));
     git('commit', '-am', 'fix: preserve bundled game policy');
     const plan = await planVersion({ root });
     await assert.rejects(

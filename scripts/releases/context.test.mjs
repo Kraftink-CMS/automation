@@ -16,6 +16,7 @@ const manifest = {
     name: 'Sample',
     description: 'An independently built package.',
     type: 'plugin',
+    games: { supported: ['*'] },
     version: '1.0.0-dev',
     requires: { cms: '>=0.0.1', php: '^8.3' },
 };
@@ -119,14 +120,13 @@ test('rehashed build metadata cannot change requirements, URLs or trusted histor
         ],
         [
             (value) => {
-                value.versions[0].supported_games = ['minecraft'];
+                value.versions[0].games = { supported: ['minecraft'] };
             },
             /trusted release history/,
         ],
         [
             (value) => {
-                value.versions[0].excluded_games = ['minecraft'];
-                value.versions[0].game_enhancements = ['hytale'];
+                value.versions[0].games = { supported: ['*'], excluded: ['minecraft'], enhancements: ['hytale'] };
             },
             /trusted release history/,
         ],

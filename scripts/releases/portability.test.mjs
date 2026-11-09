@@ -21,6 +21,7 @@ async function fixture(context) {
         JSON.stringify({
             id: 'central-example',
             type: 'plugin',
+            games: { supported: ['*'] },
             name: 'Central example',
             description: 'An independently maintained community package.',
             version: '1.0.0-dev',
@@ -132,6 +133,7 @@ test('later release builds consume trusted history without a GitHub token', asyn
         {
             version: '1.0.0',
             requirements: { cms: '>=0.0.1', php: '^8.3' },
+            games: { supported: ['*'] },
             download: {
                 url: 'https://github.com/example/Plugin-Central/releases/download/v1.0.0/central-example-1.0.0.zip',
                 sha256: 'a'.repeat(64),

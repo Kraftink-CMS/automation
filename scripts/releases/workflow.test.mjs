@@ -34,7 +34,7 @@ async function fixture(t, kind = 'custom') {
         await writeFile(resolve(root, '.github/actions/build/action.yml'), 'name: Build\nruns:\n  using: composite\n  steps: []\n');
     } else {
         await writeFile(resolve(root, 'manifest.json'), JSON.stringify({ id: 'example', type: 'plugin', name: 'Example',
-            description: 'Example plugin', version: '1.0.0-dev', requires: { cms: '>=0.0.1', php: '^8.4' } }) + '\n');
+            description: 'Example plugin', version: '1.0.0-dev', games: { supported: ['*'] }, requires: { cms: '>=0.0.1', php: '^8.4' } }) + '\n');
     }
     await writeFile(resolve(root, 'code.txt'), 'original\n');
     git('add', '.');

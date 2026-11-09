@@ -43,6 +43,7 @@ function metadata(entry) {
     };
     const version = {
         version: '1.0.0',
+        games: { supported: ['*'] },
         requirements: { cms: '>=0.0.1', php: '^8.3' },
         download: {
             url: `${resource.repository}/releases/download/v1.0.0/${slug}-1.0.0.zip`,

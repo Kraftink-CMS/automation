@@ -72,33 +72,34 @@ export function validatePresentation(value, localImages = false) {
 }
 
 export function gameCompatibility(value, type) {
-    const fields = {};
-    for (const key of ['supported_games', 'excluded_games', 'game_enhancements']) {
-        const list = value[key];
-        if (list === undefined) {
-            continue;
-        }
-        if (
-            type !== 'plugin' ||
-            !Array.isArray(list) ||
-            list.length > 50 ||
-            new Set(list).size !== list.length ||
-            [...list].some((id) => typeof id !== 'string' || id !== id.trim() || !slugPattern.test(id))
-        ) {
-            throw new Error(`${key} requires a list of up to 50 unique game IDs on a plugin.`);
-        }
-        if (list.length > 0) {
-            fields[key] = list;
-        }
+    if (['supported_games', 'excluded_games', 'game_enhancements'].some((key) => Object.hasOwn(value, key))) {
+        throw new Error('Declare plugin game compatibility in games.');
     }
-    const { supported_games: supported = [], excluded_games: excluded = [], game_enhancements: enhancements = [] } = fields;
-    if (supported.length && excluded.length) {
-        throw new Error('Only one of supported_games and excluded_games may contain game IDs.');
+    if (type !== 'plugin') {
+        if (Object.hasOwn(value, 'games')) {
+            throw new Error('Only plugins may declare games.');
+        }
+        return {};
     }
-    if (enhancements.some((id) => (supported.length && !supported.includes(id)) || excluded.includes(id))) {
-        throw new Error('game_enhancements may only reference compatible games.');
+    const games = value.games;
+    if (!games || typeof games !== 'object' || Array.isArray(games) || Object.keys(games).some((key) => !['supported', 'excluded', 'enhancements'].includes(key))) {
+        throw new Error('Plugins require a games object with a supported list.');
     }
-    return fields;
+    const { supported, excluded = [], enhancements = [] } = games;
+    const validIds = (list) =>
+        Array.isArray(list) && list.length <= 50 && new Set(list).size === list.length &&
+        [...list].every((id) => typeof id === 'string' && id === id.trim() && slugPattern.test(id));
+    const all = Array.isArray(supported) && supported.length === 1 && supported[0] === '*';
+    if ((!all && (!validIds(supported) || supported.length === 0)) || !validIds(excluded) || !validIds(enhancements)) {
+        throw new Error('Game lists require up to 50 unique IDs and supported may use a single wildcard.');
+    }
+    if (!all && excluded.length) {
+        throw new Error('Game exclusions require games.supported to be ["*"].');
+    }
+    if (enhancements.some((id) => (!all && !supported.includes(id)) || excluded.includes(id))) {
+        throw new Error('Game enhancements may only reference compatible games.');
+    }
+    return { games: { supported, ...(excluded.length ? { excluded } : {}), ...(enhancements.length ? { enhancements } : {}) } };
 }
 
 export function validateMarketSupport(value) {

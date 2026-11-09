@@ -30,6 +30,7 @@ function metadata(resource, version = '1.0.0', older = []) {
     }
     const entry = (number) => ({
         version: number,
+        ...(resource.type === 'plugin' ? { games: { supported: ['*'] } } : {}),
         requirements: {
             cms: '^1.0 || ^2.0',
             php: '>=8.3 <9.0',
@@ -145,30 +146,28 @@ test('the Market preserves support contacts and per-version compatibility across
         support: { discord: 'https://discord.com/invite/community', email: 'help+market@example.test' },
     };
     const release = metadata(resource, '2.0.0', ['1.0.0']);
-    release.versions[0].supported_games = ['hytale', 'minecraft'];
-    release.versions[0].excluded_games = [];
-    release.versions[0].game_enhancements = ['minecraft'];
-    release.versions[1].excluded_games = ['redm'];
+    release.versions[0].games = { supported: ['hytale', 'minecraft'], excluded: [], enhancements: ['minecraft'] };
+    release.versions[1].games = { supported: ['*'], excluded: ['redm'] };
     const registry = source(resource);
     const result = await generateCatalogue({ source: registry, fetchMetadata: async () => release });
     assert.deepEqual(result.failures, []);
     const [listing] = result.catalogue.resources;
     assert.deepEqual(listing.support, resource.support);
-    assert.deepEqual(listing.versions[0].supported_games, ['hytale', 'minecraft']);
-    assert.deepEqual(listing.versions[0].game_enhancements, ['minecraft']);
-    assert.equal(listing.versions[0].excluded_games, undefined);
-    assert.equal(listing.versions[1].supported_games, undefined);
-    assert.deepEqual(listing.versions[1].excluded_games, ['redm']);
+    assert.deepEqual(listing.versions[0].games, { supported: ['hytale', 'minecraft'], enhancements: ['minecraft'] });
+    assert.deepEqual(listing.versions[1].games, { supported: ['*'], excluded: ['redm'] });
 
     for (const change of [
         (bad) => { bad.resource.support = { discord: 'https://discord.gg.example.test/community' }; },
         (bad) => { bad.resource.support = { email: 'help@example.test?cc=leak@example.test' }; },
-        (bad) => { bad.versions[0].excluded_games = ['redm']; },
-        (bad) => { bad.versions[0].game_enhancements = ['redm']; },
-        (bad) => { bad.versions[1].game_enhancements = ['redm']; },
-        (bad) => { bad.versions[1].excluded_games = Array.from({ length: 51 }, (_, i) => `game-${i}`); },
-        (bad) => { bad.versions[0].supported_games = ['minecraft', 'minecraft']; },
-        (bad) => { bad.versions[0].supported_games = ['minecraft\n']; },
+        (bad) => { delete bad.versions[0].games; },
+        (bad) => { bad.versions[0].supported_games = ['minecraft']; },
+        (bad) => { bad.versions[0].games.excluded = ['redm']; },
+        (bad) => { bad.versions[0].games.enhancements = ['redm']; },
+        (bad) => { bad.versions[1].games.enhancements = ['redm']; },
+        (bad) => { bad.versions[1].games.excluded = Array.from({ length: 51 }, (_, i) => `game-${i}`); },
+        (bad) => { bad.versions[0].games.supported = ['minecraft', 'minecraft']; },
+        (bad) => { bad.versions[0].games.supported = ['minecraft\n']; },
+        (bad) => { bad.versions[0].games.supported = ['*', 'minecraft']; },
     ]) {
         const invalid = structuredClone(release);
         change(invalid);
@@ -772,7 +771,7 @@ test('manual external offers publish prices and compatibility without a GitHub r
         url: 'https://creator.example/products/external',
         price: { amount: '12.50', currency: 'EUR' },
     };
-    resource.versions = [{ version: '1.0.0', requirements: { cms: '^1.0', php: '^8.3' } }];
+    resource.versions = [{ version: '1.0.0', games: { supported: ['*'] }, requirements: { cms: '^1.0', php: '^8.3' } }];
     const registry = { schema_version: 1, repositories: [], resources: [resource] };
     const result = await generateCatalogue({
         source: registry,
